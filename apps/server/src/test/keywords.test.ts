@@ -255,3 +255,29 @@ describe("выгрузка в Google Таблицу", () => {
     assert.match(status.json().lastError, /Google говорит нет/);
   });
 });
+
+describe("повтор после отказа Wildberries", () => {
+  it("повторяет раньше обычного срока, а не позже", async () => {
+    const { retryDelayMin } = await import("../services/keywords.js");
+    const interval = 360; // шесть часов — обычный интервал проверки
+
+    assert.equal(retryDelayMin(1, interval), 10, "первый повтор — через десять минут");
+    assert.equal(retryDelayMin(2, interval), 20);
+    assert.equal(retryDelayMin(3, interval), 40);
+    assert.ok(
+      retryDelayMin(10, interval) <= interval,
+      "пауза после отказа не должна превышать обычный интервал: иначе один отказ WB оставляет пользователя без позиций на полдня",
+    );
+  });
+
+  it("при отказе назначает скорый повтор, а не через сутки", async () => {
+    const { markKeywordError } = await import("../services/keywords.js");
+    const [keyword] = await db.select().from(keywords);
+
+    await markKeywordError(keyword!.id, 360);
+    const [after] = await db.select().from(keywords).where(eq(keywords.id, keyword!.id));
+
+    const waitMin = (after!.nextCheckAt.getTime() - Date.now()) / 60_000;
+    assert.ok(waitMin < 30, `повтор должен быть скоро, а не через ${Math.round(waitMin)} мин`);
+  });
+});

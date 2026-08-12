@@ -6,7 +6,7 @@ import { db } from "../db/client.js";
 import { keywords } from "../db/schema.js";
 import { requireAuth } from "../auth.js";
 import { config } from "../config.js";
-import { checkKeyword, keywordHistory, listKeywords } from "../services/keywords.js";
+import { checkKeyword, keywordHistory, listKeywords, markKeywordError } from "../services/keywords.js";
 
 const settings = z.object({
   maxPages: z.coerce.number().int().min(1).max(3).optional(),
@@ -60,6 +60,8 @@ export async function keywordRoutes(app: FastifyInstance, wb: WbClient): Promise
       return reply.send({ id: row.id, ...result });
     } catch (error) {
       if (error instanceof WbUnavailableError) {
+        // назначаем скорый повтор: иначе запрос ждал бы полного интервала
+        await markKeywordError(row.id, parsed.data.intervalMin ?? 360);
         return reply.send({
           id: row.id,
           phrase,

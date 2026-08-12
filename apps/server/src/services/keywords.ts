@@ -105,7 +105,16 @@ async function lastFoundNms(keywordId: number): Promise<number[]> {
   return rowsOf<{ nm: number | string }>(result).map((r) => Number(r.nm));
 }
 
-/** Запрос не проверился: откладываем тем дальше, чем дольше не выходит. */
+/** Пауза перед повтором после отказа, минут. Вынесена отдельно ради проверяемости. */
+export function retryDelayMin(errorCount: number, intervalMin: number): number {
+  // Повторяем РАНЬШЕ обычного срока, а не позже: данных мы не получили, а
+  // обычный интервал у ключевых слов измеряется часами. Ждать его целиком
+  // значит оставить пользователя без позиций на полдня из-за одного отказа WB.
+  // Пауза растёт с каждой неудачей, но никогда не превышает обычный интервал.
+  return Math.min(intervalMin, 10 * 2 ** Math.max(errorCount - 1, 0));
+}
+
+/** Запрос не проверился: повторяем скорее обычного, с растущей паузой. */
 export async function markKeywordError(keywordId: number, intervalMin: number): Promise<void> {
   const [row] = await db
     .select({ errorCount: keywords.errorCount })
@@ -115,7 +124,7 @@ export async function markKeywordError(keywordId: number, intervalMin: number): 
   const errorCount = (row?.errorCount ?? 0) + 1;
   await db
     .update(keywords)
-    .set({ errorCount, nextCheckAt: nextCheckTime(intervalMin * Math.min(2 ** errorCount, 8)) })
+    .set({ errorCount, nextCheckAt: nextCheckTime(retryDelayMin(errorCount, intervalMin)) })
     .where(eq(keywords.id, keywordId));
 }
 
