@@ -149,6 +149,18 @@ export class FakeGoogle {
     this.shared.push({ spreadsheetId, email });
   }
 
+  async unshareEmail(spreadsheetId: string, email: string) {
+    this.guard();
+    this.shared = this.shared.filter((s) => !(s.spreadsheetId === spreadsheetId && s.email === email));
+  }
+
+  titles = new Map<string, string>();
+
+  async renameSpreadsheet(spreadsheetId: string, title: string) {
+    this.guard();
+    this.titles.set(spreadsheetId, title);
+  }
+
   async ensureSheets(spreadsheetId: string, sheets: string[]) {
     this.guard();
     const book = this.spreadsheets.get(spreadsheetId);

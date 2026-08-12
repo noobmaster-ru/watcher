@@ -4,6 +4,8 @@ import { z } from "zod";
 import { db } from "../db/client.js";
 import { users } from "../db/schema.js";
 import { config } from "../config.js";
+import { AccountError, changeEmail } from "../services/account.js";
+import type { GoogleApi } from "../services/google.js";
 import {
   SESSION_COOKIE,
   destroyOtherSessions,
@@ -21,7 +23,7 @@ const credentials = z.object({
   password: z.string().min(8, "Пароль от 8 символов").max(200),
 });
 
-export async function authRoutes(app: FastifyInstance): Promise<void> {
+export async function authRoutes(app: FastifyInstance, google: GoogleApi | null = null): Promise<void> {
   app.post("/api/auth/register", async (request, reply) => {
     if (!config.allowRegistration) {
       return reply.code(403).send({ error: "Регистрация закрыта" });
@@ -100,6 +102,23 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     // остальные сессии гасим: сменил пароль — значит, чужой доступ надо оборвать
     await destroyOtherSessions(userId, request.cookies[SESSION_COOKIE]);
     return reply.send({ ok: true });
+  });
+
+  app.post("/api/auth/email", { preHandler: requireAuth }, async (request, reply) => {
+    const parsed = z
+      .object({ current: z.string().min(1), email: z.string().email("Некорректный email").max(255) })
+      .safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? "Некорректные данные" });
+    }
+
+    try {
+      const result = await changeEmail(request.user!.id, parsed.data.current, parsed.data.email, google);
+      return reply.send(result);
+    } catch (error) {
+      if (error instanceof AccountError) return reply.code(error.status).send({ error: error.message });
+      throw error;
+    }
   });
 
   app.get("/api/me", async (request, reply) => {

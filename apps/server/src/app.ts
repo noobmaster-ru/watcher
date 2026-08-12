@@ -70,7 +70,7 @@ export async function buildApp(options: BuildOptions = {}): Promise<App> {
   server.addHook("preHandler", loadUser);
 
   await server.register(async (instance) => healthRoutes(instance, wb));
-  await server.register(authRoutes);
+  await server.register(async (instance) => authRoutes(instance, google));
   await server.register(async (instance) => catalogRoutes(instance, wb));
   await server.register(async (instance) => watchRoutes(instance, wb));
   await server.register(alertRoutes);

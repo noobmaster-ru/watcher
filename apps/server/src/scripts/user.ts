@@ -17,6 +17,7 @@ function usage(): never {
   console.error(`Использование:
   user create <email> <пароль>     создать пользователя
   user password <email> <пароль>   сменить пароль
+  user email <старая> <новая>      сменить почту
   user list                        список пользователей`);
   process.exit(1);
 }
@@ -46,6 +47,22 @@ try {
         .returning({ id: users.id });
       if (!updated) throw new Error(`Пользователь ${email} не найден`);
       console.log(`Пароль для ${email} обновлён`);
+      break;
+    }
+    case "email": {
+      // здесь без переноса доступа к таблице: команда для аварийных случаев,
+      // обычный путь — форма в настройках, она правит и права в Google
+      if (!email || !password) usage();
+      const next = password.toLowerCase().trim();
+      const [taken] = await db.select({ id: users.id }).from(users).where(eq(users.email, next));
+      if (taken) throw new Error(`Почта ${next} уже занята`);
+      const [updated] = await db
+        .update(users)
+        .set({ email: next })
+        .where(eq(users.email, email.toLowerCase().trim()))
+        .returning({ id: users.id });
+      if (!updated) throw new Error(`Пользователь ${email} не найден`);
+      console.log(`Почта изменена: ${email} → ${next}`);
       break;
     }
     case "list": {

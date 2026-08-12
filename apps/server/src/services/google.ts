@@ -34,6 +34,8 @@ const base64url = (value: string | Buffer): string =>
 export interface GoogleApi {
   createSpreadsheet(title: string, sheets: string[]): Promise<{ spreadsheetId: string; spreadsheetUrl: string }>;
   shareWithEmail(spreadsheetId: string, email: string): Promise<void>;
+  unshareEmail(spreadsheetId: string, email: string): Promise<void>;
+  renameSpreadsheet(spreadsheetId: string, title: string): Promise<void>;
   ensureSheets(spreadsheetId: string, sheets: string[]): Promise<void>;
   appendRows(spreadsheetId: string, sheet: string, rows: Array<Array<string | number | null>>): Promise<number>;
   clearSheet(spreadsheetId: string, sheet: string): Promise<void>;
@@ -114,6 +116,30 @@ export class GoogleSheetsApi implements GoogleApi {
     await this.call(`${DRIVE_API}/${spreadsheetId}/permissions?sendNotificationEmail=false`, {
       method: "POST",
       body: JSON.stringify({ role: "writer", type: "user", emailAddress: email }),
+    });
+  }
+
+  /**
+   * Закрывает доступ адресу. Нужно при смене почты: старый адрес не должен
+   * сохранять доступ к данным аккаунта.
+   */
+  async unshareEmail(spreadsheetId: string, email: string): Promise<void> {
+    const list = await this.call<{ permissions?: Array<{ id: string; emailAddress?: string }> }>(
+      `${DRIVE_API}/${spreadsheetId}/permissions?fields=permissions(id,emailAddress)`,
+      { method: "GET" },
+    );
+    const target = (list.permissions ?? []).find(
+      (permission) => permission.emailAddress?.toLowerCase() === email.toLowerCase(),
+    );
+    if (!target) return;
+    await this.call(`${DRIVE_API}/${spreadsheetId}/permissions/${target.id}`, { method: "DELETE" });
+  }
+
+  /** Переименование: в названии таблицы стоит почта владельца. */
+  async renameSpreadsheet(spreadsheetId: string, title: string): Promise<void> {
+    await this.call(`${DRIVE_API}/${spreadsheetId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: title }),
     });
   }
 

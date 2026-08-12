@@ -65,7 +65,7 @@ npm run dev:web               # http://localhost:5173
 ## Проверка
 
 ```bash
-npm test                  # 82 теста: логика событий, планировщик, HTTP API, регрессии
+npm test                  # 91 тест: логика событий, планировщик, HTTP API, регрессии
 npm run check:endpoints   # живы ли шесть эндпоинтов Wildberries
 npm run check:live        # сквозной прогон на настоящем WB во временной БД
 ```
@@ -180,8 +180,16 @@ docker compose exec app node apps/server/dist/scripts/user.js password you@examp
 docker compose exec app node apps/server/dist/scripts/user.js list
 ```
 
-Пароль можно сменить и из интерфейса, на вкладке «Настройки» — при этом все
-остальные сессии завершаются.
+Пароль и почту можно сменить из интерфейса, на вкладке «Настройки». При смене пароля все остальные
+сессии завершаются. При смене почты доступ к Гугл-таблице переоткрывается на новый адрес, а для
+старого закрывается: почта — это и логин, и адрес, которому выдан доступ к данным аккаунта.
+
+```bash
+docker compose exec app node apps/server/dist/scripts/user.js email old@example.com new@example.com
+```
+
+Консольная команда меняет только запись в базе и права в Google не трогает — она для аварийных
+случаев, обычный путь лежит через настройки.
 
 ## MCP-сервер
 

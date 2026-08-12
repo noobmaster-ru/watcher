@@ -33,6 +33,7 @@ export function SettingsPage() {
         </p>
       </section>
 
+      <ChangeEmail />
       <ChangePassword />
 
       <section className="card space-y-2">
@@ -59,6 +60,93 @@ export function SettingsPage() {
         )}
       </section>
     </div>
+  );
+}
+
+function ChangeEmail() {
+  const queryClient = useQueryClient();
+  const me = useQuery({ queryKey: ["me"], queryFn: () => api.get<{ user: { email: string } }>("/api/me") });
+  const [email, setEmail] = useState("");
+  const [current, setCurrent] = useState("");
+  const [done, setDone] = useState<{ email: string; sheetError: string | null } | null>(null);
+
+  const change = useMutation({
+    mutationFn: () => api.post<{ email: string; sheetUpdated: boolean; sheetError: string | null }>("/api/auth/email", { current, email }),
+    onSuccess: (data) => {
+      setCurrent("");
+      setEmail("");
+      setDone({ email: data.email, sheetError: data.sheetError });
+      void queryClient.invalidateQueries({ queryKey: ["me"] });
+      void queryClient.invalidateQueries({ queryKey: ["sheet"] });
+    },
+  });
+
+  return (
+    <section className="card space-y-3">
+      <div>
+        <h2 className="font-semibold">Почта аккаунта</h2>
+        <p className="muted">
+          Текущая: <span className="font-medium">{me.data?.user.email ?? "…"}</span>. Почта — это и логин, и адрес,
+          на который открыт доступ к Гугл-таблице: при смене доступ переоткрывается на новый, а для старого
+          закрывается.
+        </p>
+      </div>
+
+      <form
+        className="space-y-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setDone(null);
+          change.mutate();
+        }}
+      >
+        <div>
+          <label className="label" htmlFor="new-email">
+            Новая почта
+          </label>
+          <input
+            id="new-email"
+            type="email"
+            className="input"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            required
+            autoComplete="email"
+          />
+        </div>
+        <div>
+          <label className="label" htmlFor="email-password">
+            Текущий пароль
+          </label>
+          <input
+            id="email-password"
+            type="password"
+            className="input"
+            value={current}
+            onChange={(event) => setCurrent(event.target.value)}
+            required
+            autoComplete="current-password"
+          />
+        </div>
+
+        {change.error != null && <ErrorBox error={change.error} />}
+        {done && (
+          <div className="space-y-1 text-sm">
+            <p className="text-emerald-600">Почта изменена на {done.email}. Входите теперь по ней.</p>
+            {done.sheetError && (
+              <p className="text-amber-600">
+                Доступ к Гугл-таблице переоткрыть не удалось: {done.sheetError}. Нажмите «Гугл-таблица» —
+                выгрузка попробует ещё раз.
+              </p>
+            )}
+          </div>
+        )}
+
+        <button className="btn-primary" disabled={change.isPending || !email || !current}>
+          {change.isPending ? "…" : "Сменить почту"}
+        </button>
+      </form>
+    </section>
   );
 }
 
