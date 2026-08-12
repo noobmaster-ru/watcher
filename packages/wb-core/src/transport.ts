@@ -47,14 +47,19 @@ const BASE_BACKOFF_MS = 5_000;
 const MAX_BACKOFF_MS = 5 * 60_000;
 
 /**
- * Хосты, у которых штраф за превышение держится долго. Для них пауза после
- * серии отказов считается от минут, а не от секунд: пятисекундный бэкофф на
- * поиске приводил к тому, что клиент продолжал долбиться в закрытую дверь и
- * продлевал себе же блокировку.
+ * Хосты, у которых штраф за превышение держится долго и наказывается сама
+ * серия запросов, а не их общее число.
+ *
+ * Замер с боевого сервера: после нагрузки search.wb.ru отвечал 429 двенадцать
+ * попыток подряд с паузой в минуту. Для таких хостов ретраи внутри одного
+ * вызова вредны — это и есть та серия, за которую бьют, — поэтому попытка
+ * всегда одна, а предохранитель закрывается с первого же отказа.
  */
 const SLOW_RECOVERY_HOSTS = new Set(["search.wb.ru"]);
 const SLOW_BASE_BACKOFF_MS = 5 * 60_000;
 const SLOW_MAX_BACKOFF_MS = 60 * 60_000;
+/** Сколько отказов терпим до закрытия хоста: у «медленных» — ни одного. */
+const SLOW_TRIP_AFTER_FAILURES = 1;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -152,18 +157,20 @@ class HostQueue {
     this.failures += 1;
     this.lastStatus = status;
     this.lastErrorAt = Date.now();
-    if (this.failures >= TRIP_AFTER_FAILURES) {
-      const slow = SLOW_RECOVERY_HOSTS.has(this.host);
+    const slow = SLOW_RECOVERY_HOSTS.has(this.host);
+    const trip = slow ? SLOW_TRIP_AFTER_FAILURES : TRIP_AFTER_FAILURES;
+    if (this.failures >= trip) {
       const base = slow ? SLOW_BASE_BACKOFF_MS : BASE_BACKOFF_MS;
       const max = slow ? SLOW_MAX_BACKOFF_MS : MAX_BACKOFF_MS;
-      const over = this.failures - TRIP_AFTER_FAILURES;
+      const over = this.failures - trip;
       this.blockedUntil = Date.now() + Math.min(base * 2 ** over, max);
     }
   }
 
   get state(): HostState {
     if (this.failures >= BANNED_AFTER_FAILURES) return "banned";
-    if (this.failures >= TRIP_AFTER_FAILURES || this.blockedForMs() > 0) return "degraded";
+    const trip = SLOW_RECOVERY_HOSTS.has(this.host) ? SLOW_TRIP_AFTER_FAILURES : TRIP_AFTER_FAILURES;
+    if (this.failures >= trip || this.blockedForMs() > 0) return "degraded";
     return "ok";
   }
 
@@ -259,8 +266,11 @@ export class WbTransport {
    * 429/403/5xx → ретраи с джиттером, затем WbUnavailableError.
    */
   async getJson<T>(url: string, options: RequestOptions = {}): Promise<T | null> {
-    const { priority = "interactive", retries = 3, timeoutSec = 20 } = options;
+    const { priority = "interactive", timeoutSec = 20 } = options;
     const host = new URL(url).host;
+    // У хостов с долгим штрафом повтор внутри вызова только усугубляет: серия
+    // запросов и есть то, за что WB наказывает. Одна попытка, дальше — пауза.
+    const retries = SLOW_RECOVERY_HOSTS.has(host) ? 0 : (options.retries ?? 3);
     const queue = this.queueFor(host);
 
     const blocked = queue.blockedForMs();
