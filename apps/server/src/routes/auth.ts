@@ -42,7 +42,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     if (!user) return reply.code(500).send({ error: "Не удалось создать пользователя" });
 
     const session = await createSession(user.id);
-    setSessionCookie(reply, session.token, session.expiresAt, config.isProduction);
+    setSessionCookie(reply, session.token, session.expiresAt, config.cookieSecure);
     return reply.send({ user });
   });
 
@@ -64,7 +64,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const session = await createSession(user.id);
-    setSessionCookie(reply, session.token, session.expiresAt, config.isProduction);
+    setSessionCookie(reply, session.token, session.expiresAt, config.cookieSecure);
     return reply.send({ user: { id: user.id, email: user.email } });
   });
 

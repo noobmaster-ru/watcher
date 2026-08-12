@@ -36,6 +36,16 @@ export const config = {
   allowRegistration: bool("ALLOW_REGISTRATION", true),
   isProduction: process.env.NODE_ENV === "production",
 
+  /**
+   * Помечать ли куку сессии флагом Secure. Ориентир — реальная схема PUBLIC_URL,
+   * а не NODE_ENV: боевой стенд может отдаваться по HTTP (свой порт, чужой прокси
+   * впереди), и тогда Secure-кука молча ломает вход — браузер её не отправляет и
+   * даже не сохраняет, а пользователь видит бесконечную форму логина.
+   */
+  cookieSecure: process.env.COOKIE_SECURE?.trim()
+    ? bool("COOKIE_SECURE", false)
+    : str("PUBLIC_URL", "http://localhost:3000").startsWith("https://"),
+
   wb: {
     dest: str("WB_DEST", "-1257786"),
     spp: str("WB_SPP", "30"),

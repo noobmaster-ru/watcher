@@ -11,6 +11,13 @@ const scheduler = new Scheduler(wb);
 await server.listen({ port: config.port, host: config.host });
 console.error(`[watcher] слушает http://${config.host}:${config.port}`);
 
+if (!config.cookieSecure) {
+  console.error(
+    "[watcher] ВНИМАНИЕ: сайт отдаётся по HTTP — пароли и куки идут открытым текстом. " +
+      "Для боевой эксплуатации укажите домен в SITE_ADDRESS и https в PUBLIC_URL.",
+  );
+}
+
 scheduler.start();
 
 if (isTelegramEnabled()) {

@@ -63,7 +63,7 @@ npm run dev:web               # http://localhost:5173
 ## Проверка
 
 ```bash
-npm test              # 40 тестов: логика событий, планировщик, HTTP API
+npm test                  # 60 тестов: логика событий, планировщик, HTTP API, регрессии
 npm run check:endpoints   # живы ли шесть эндпоинтов Wildberries
 npm run check:live        # сквозной прогон на настоящем WB во временной БД
 ```
@@ -121,9 +121,24 @@ curl https://watcher.example.com/api/health
 | `SELLER_SYNC_INTERVAL_HOURS` | `12` | Как часто пересинхронизировать каталоги продавцов |
 | `SCHEDULER_ENABLED` | `true` | Выключает фоновый обход (удобно в разработке) |
 | `ALLOW_REGISTRATION` | `true` | Закрывает регистрацию новых пользователей |
+| `HTTP_PORT` / `HTTPS_PORT` | `80` / `443` | Внешние порты Caddy. Меняйте, если порты заняты другим проектом |
+| `SITE_ADDRESS` | `:80` | Домен для автоматического TLS либо `:80` без него |
 
 Регион и `spp` записываются в каждую точку истории: без этой пометки цены, снятые для разных
 регионов, несравнимы между собой.
+
+## Пользователи при закрытой регистрации
+
+Когда `ALLOW_REGISTRATION=false`, аккаунты заводятся из консоли:
+
+```bash
+docker compose exec app node apps/server/dist/scripts/user.js create you@example.com 'пароль'
+docker compose exec app node apps/server/dist/scripts/user.js password you@example.com 'новый'
+docker compose exec app node apps/server/dist/scripts/user.js list
+```
+
+Пароль можно сменить и из интерфейса, на вкладке «Настройки» — при этом все
+остальные сессии завершаются.
 
 ## MCP-сервер
 

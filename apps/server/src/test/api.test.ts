@@ -328,3 +328,18 @@ describe("смена пароля", () => {
     assert.equal(newPassword.statusCode, 200);
   });
 });
+
+describe("кука сессии", () => {
+  it("не помечается Secure, когда сайт отдаётся по HTTP", async () => {
+    // Иначе браузер не сохранит и не отправит её, и вход будет молча не работать:
+    // сервер отвечает 200, а пользователь остаётся на форме логина.
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "user@example.com", password: "новыйпароль123" },
+    });
+    const raw = String(response.headers["set-cookie"]);
+    assert.match(raw, /HttpOnly/i);
+    assert.doesNotMatch(raw, /;\s*Secure/i, "при HTTP-стенде флаг Secure запирает пользователя снаружи");
+  });
+});
