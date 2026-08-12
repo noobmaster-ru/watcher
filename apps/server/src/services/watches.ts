@@ -24,7 +24,6 @@ export interface WatchInput {
   onRise?: boolean;
   onStockChange?: boolean;
   onNewProduct?: boolean;
-  notifyTelegram?: boolean;
 }
 
 function clampInterval(value: number | undefined): number {
@@ -54,7 +53,6 @@ export async function watchProduct(client: WbClient, input: WatchInput & { nm: n
       onRise: input.onRise ?? false,
       onStockChange: input.onStockChange ?? true,
       onNewProduct: input.onNewProduct ?? true,
-      notifyTelegram: input.notifyTelegram ?? true,
       isActive: true,
     })
     .onConflictDoUpdate({
@@ -107,7 +105,6 @@ export async function watchSeller(
       onRise: input.onRise ?? false,
       onStockChange: input.onStockChange ?? true,
       onNewProduct: input.onNewProduct ?? true,
-      notifyTelegram: input.notifyTelegram ?? true,
       isActive: true,
     })
     .onConflictDoUpdate({
@@ -256,7 +253,7 @@ export async function listWatches(userId: number): Promise<Record<string, unknow
       w.id, w.kind, w.nm, w.supplier_id as "supplierId", w.title, w.interval_min as "intervalMin",
       w.min_change_pct as "minChangePct", w.min_change_abs as "minChangeAbs",
       w.on_drop as "onDrop", w.on_rise as "onRise", w.on_stock_change as "onStockChange",
-      w.on_new_product as "onNewProduct", w.notify_telegram as "notifyTelegram",
+      w.on_new_product as "onNewProduct",
       w.created_at as "createdAt",
       p.name as "productName", p.brand, p.supplier_name as "supplierName",
       p.last_price as "lastPrice", p.last_basic as "lastBasic", p.last_in_stock as "lastInStock",

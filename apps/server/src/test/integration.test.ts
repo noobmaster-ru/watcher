@@ -181,35 +181,3 @@ describe("отписка", () => {
     assert.equal(product?.isTracked, false);
   });
 });
-
-describe("доставка уведомлений в Telegram", () => {
-  it("не отправляет события, случившиеся до подключения чата", async () => {
-    const { userChannels } = await import("../db/schema.js");
-    const { deliverPendingAlerts } = await import("../services/telegram.js");
-
-    // событие произошло час назад, чат привязан только что
-    await db.insert(alerts).values({
-      userId,
-      nm: NM,
-      type: "price_drop",
-      oldPrice: 2000,
-      newPrice: 1000,
-      createdAt: new Date(Date.now() - 3600_000),
-    });
-    await db.insert(userChannels).values({
-      userId,
-      telegramChatId: "123456",
-      verifiedAt: new Date(),
-    });
-
-    // без TELEGRAM_BOT_TOKEN отправка выключена — проверяем, что выборка пуста
-    const sent = await deliverPendingAlerts();
-    assert.equal(sent, 0);
-
-    const stale = await db
-      .select()
-      .from(alerts)
-      .where(and(eq(alerts.nm, NM), eq(alerts.type, "price_drop")));
-    assert.ok(stale.every((a) => a.deliveredAt === null), "старые события остаются недоставленными");
-  });
-});

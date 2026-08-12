@@ -61,10 +61,6 @@ export const config = {
     tickMs: num("SCHEDULER_TICK_MS", 20_000),
   },
 
-  telegram: {
-    botToken: process.env.TELEGRAM_BOT_TOKEN?.trim() || undefined,
-    mode: (process.env.TELEGRAM_MODE?.trim() || "polling") as "polling" | "webhook",
-  },
 
   /** Минимальный и максимальный интервал проверки, который можно выставить в интерфейсе. */
   limits: {

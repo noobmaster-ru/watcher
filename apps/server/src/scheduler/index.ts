@@ -6,7 +6,6 @@
 import type { WbClient } from "@watcher/wb-core";
 import { config } from "../config.js";
 import { purgeExpiredSessions } from "../auth.js";
-import { deliverPendingAlerts } from "../services/telegram.js";
 import { runPriceTick } from "./prices.js";
 import { runSellerTick } from "./sellers.js";
 
@@ -42,10 +41,6 @@ export class Scheduler {
       }
     });
 
-    this.every(30_000, "уведомления", async () => {
-      const sent = await deliverPendingAlerts();
-      if (sent > 0) log(`отправлено уведомлений: ${sent}`);
-    });
 
     this.every(24 * 3600_000, "сессии", async () => {
       await purgeExpiredSessions();

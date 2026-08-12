@@ -55,19 +55,6 @@ export const sessions = pgTable(
   }),
 );
 
-/** Канал доставки уведомлений. Пока один — Telegram. */
-export const userChannels = pgTable("user_channels", {
-  userId: integer("user_id")
-    .primaryKey()
-    .references(() => users.id, { onDelete: "cascade" }),
-  telegramChatId: text("telegram_chat_id"),
-  /** Одноразовый токен для ссылки t.me/<bot>?start=<token>. */
-  bindToken: text("bind_token"),
-  bindTokenExpiresAt: timestamp("bind_token_expires_at", { withTimezone: true }),
-  verifiedAt: timestamp("verified_at", { withTimezone: true }),
-  createdAt: now(),
-});
-
 // ── справочники Wildberries ──────────────────────────────────────────────────
 export const sellers = pgTable("sellers", {
   supplierId: integer("supplier_id").primaryKey(),
@@ -187,7 +174,6 @@ export const watches = pgTable(
     onRise: boolean("on_rise").notNull().default(false),
     onStockChange: boolean("on_stock_change").notNull().default(true),
     onNewProduct: boolean("on_new_product").notNull().default(true),
-    notifyTelegram: boolean("notify_telegram").notNull().default(true),
 
     createdAt: now(),
   },
@@ -228,20 +214,16 @@ export const alerts = pgTable(
     newPrice: integer("new_price"),
     createdAt: now(),
     readAt: timestamp("read_at", { withTimezone: true }),
-    /** Когда ушло в Telegram. null + notifyTelegram = ждёт отправки. */
-    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
   },
   (t) => ({
     feedIdx: index("alerts_user_created_idx").on(t.userId, t.createdAt),
-    undeliveredIdx: index("alerts_undelivered_idx").on(t.deliveredAt),
   }),
 );
 
 // ── связи ────────────────────────────────────────────────────────────────────
-export const usersRelations = relations(users, ({ many, one }) => ({
+export const usersRelations = relations(users, ({ many }) => ({
   watches: many(watches),
   alerts: many(alerts),
-  channel: one(userChannels, { fields: [users.id], references: [userChannels.userId] }),
 }));
 
 export const watchesRelations = relations(watches, ({ one }) => ({

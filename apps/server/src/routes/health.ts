@@ -2,7 +2,6 @@ import type { FastifyInstance } from "fastify";
 import { sql } from "drizzle-orm";
 import type { WbClient } from "@watcher/wb-core";
 import { db } from "../db/client.js";
-import { isTelegramEnabled } from "../services/telegram.js";
 
 /**
  * Здоровье приложения. Отдельно показывает состояние каждого хоста WB: пустая
@@ -22,7 +21,6 @@ export async function healthRoutes(app: FastifyInstance, wb: WbClient): Promise<
     return reply.code(database === "ok" ? 200 : 503).send({
       database,
       wb: { state: wb.overallState(), detailHost: wb.activeDetailHost(), hosts },
-      telegram: isTelegramEnabled() ? "on" : "off",
       time: new Date().toISOString(),
     });
   });

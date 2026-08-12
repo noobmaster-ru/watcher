@@ -93,7 +93,6 @@ export interface Watch {
   onRise: boolean;
   onStockChange: boolean;
   onNewProduct: boolean;
-  notifyTelegram: boolean;
   productName: string | null;
   brand: string | null;
   supplierName: string | null;
@@ -130,6 +129,9 @@ export interface PricePoint {
 
 export interface Health {
   database: "ok" | "down";
-  wb: { state: "ok" | "degraded" | "banned"; hosts: Array<{ host: string; state: string; lastStatus: number | null }> };
-  telegram: "on" | "off";
+  wb: {
+    state: "ok" | "degraded" | "banned";
+    detailHost: string;
+    hosts: Array<{ host: string; state: string; lastStatus: number | null }>;
+  };
 }

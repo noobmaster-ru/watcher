@@ -3,7 +3,6 @@ import { buildApp } from "./app.js";
 import { config } from "./config.js";
 import { closeDb } from "./db/client.js";
 import { Scheduler } from "./scheduler/index.js";
-import { isTelegramEnabled, registerWebhook, startPolling, stopPolling } from "./services/telegram.js";
 
 const { server, wb } = await buildApp();
 const scheduler = new Scheduler(wb);
@@ -20,25 +19,12 @@ if (!config.cookieSecure) {
 
 scheduler.start();
 
-if (isTelegramEnabled()) {
-  if (config.telegram.mode === "webhook") {
-    await registerWebhook().catch((error: Error) => console.error("[telegram] вебхук:", error.message));
-    console.error("[telegram] режим: вебхук");
-  } else {
-    startPolling();
-    console.error("[telegram] режим: long polling");
-  }
-} else {
-  console.error("[telegram] выключен: не задан TELEGRAM_BOT_TOKEN");
-}
-
 let shuttingDown = false;
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   console.error(`[watcher] ${signal}: останавливаюсь`);
   await scheduler.stop();
-  stopPolling();
   await server.close();
   await closeDb();
   process.exit(0);

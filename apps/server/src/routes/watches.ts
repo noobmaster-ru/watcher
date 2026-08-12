@@ -17,7 +17,6 @@ const rules = z.object({
   onRise: z.boolean().optional(),
   onStockChange: z.boolean().optional(),
   onNewProduct: z.boolean().optional(),
-  notifyTelegram: z.boolean().optional(),
 });
 
 const createSchema = z.discriminatedUnion("kind", [

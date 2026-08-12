@@ -4,7 +4,6 @@ import { api, type Health } from "../lib/api";
 import { ErrorBox, Spinner } from "../components/ui";
 
 interface Settings {
-  telegram: { available: boolean; connected: boolean };
   defaults: { intervalMin: number; minIntervalMin: number; maxIntervalMin: number };
 }
 
@@ -14,56 +13,12 @@ export function SettingsPage() {
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => api.get<Settings>("/api/settings") });
   const health = useQuery({ queryKey: ["health"], queryFn: () => api.get<Health>("/api/health") });
 
-  const bind = useMutation({
-    mutationFn: () => api.post<{ url: string }>("/api/telegram/bind"),
-    onSuccess: (data) => window.open(data.url, "_blank", "noopener"),
-  });
-
-  const unbind = useMutation({
-    mutationFn: () => api.post("/api/telegram/unbind"),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["settings"] }),
-  });
 
   if (settings.isLoading) return <Spinner />;
   if (settings.error) return <ErrorBox error={settings.error} />;
 
   return (
     <div className="space-y-6">
-      <section className="card space-y-3">
-        <h2 className="font-semibold">Уведомления в Telegram</h2>
-
-        {!settings.data?.telegram.available && (
-          <p className="muted">
-            Бот не настроен: на сервере не задан <code>TELEGRAM_BOT_TOKEN</code>. События всё равно копятся на вкладке
-            «События».
-          </p>
-        )}
-
-        {settings.data?.telegram.available && (
-          <>
-            <p className="muted">
-              {settings.data.telegram.connected
-                ? "Telegram подключён — уведомления приходят в чат с ботом."
-                : "Нажмите кнопку: откроется чат с ботом, где нужно нажать «Запустить». Ссылка действует 15 минут."}
-            </p>
-            <div className="flex gap-2">
-              {settings.data.telegram.connected ? (
-                <button className="btn-ghost" onClick={() => unbind.mutate()} disabled={unbind.isPending}>
-                  Отключить
-                </button>
-              ) : (
-                <button className="btn-primary" onClick={() => bind.mutate()} disabled={bind.isPending}>
-                  {bind.isPending ? "…" : "Подключить Telegram"}
-                </button>
-              )}
-              <button className="btn-ghost" onClick={() => queryClient.invalidateQueries({ queryKey: ["settings"] })}>
-                Обновить статус
-              </button>
-            </div>
-            {bind.error != null && <ErrorBox error={bind.error} />}
-          </>
-        )}
-      </section>
 
       <section className="card space-y-2">
         <h2 className="font-semibold">Проверка цен</h2>
@@ -87,6 +42,10 @@ export function SettingsPage() {
           <div className="space-y-1 text-sm">
             <StatusRow label="База данных" state={health.data.database === "ok" ? "ok" : "down"} />
             <StatusRow label="Wildberries" state={health.data.wb.state} />
+            <div className="muted flex justify-between pl-4">
+              <span>активный хост карточек</span>
+              <span>{health.data.wb.detailHost}</span>
+            </div>
             {health.data.wb.hosts.map((host) => (
               <div key={host.host} className="muted flex justify-between pl-4">
                 <span>{host.host}</span>
@@ -96,7 +55,6 @@ export function SettingsPage() {
                 </span>
               </div>
             ))}
-            <StatusRow label="Telegram" state={health.data.telegram === "on" ? "ok" : "off"} />
           </div>
         )}
       </section>

@@ -105,6 +105,10 @@ export class FakeWb {
     return [];
   }
 
+  activeDetailHost() {
+    return "card.wb.ru";
+  }
+
   overallState() {
     return "ok" as const;
   }

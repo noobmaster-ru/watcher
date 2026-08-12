@@ -234,8 +234,6 @@ export async function fanOutEvents(events: PriceEvent[]): Promise<number> {
         type: event.type,
         oldPrice: event.oldPrice,
         newPrice: event.newPrice,
-        // если пользователь отключил Telegram для подписки — сразу помечаем как доставленное
-        deliveredAt: watch.notifyTelegram ? null : new Date(),
       });
     }
   }
