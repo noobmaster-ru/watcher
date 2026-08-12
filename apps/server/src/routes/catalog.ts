@@ -10,7 +10,7 @@ import { z } from "zod";
 import { WbUnavailableError, toNm, toSupplierId, type WbClient } from "@watcher/wb-core";
 import { db } from "../db/client.js";
 import { pricePoints, products, sellerProducts, sellers, watches } from "../db/schema.js";
-import { applySnapshot, upsertProduct } from "../services/products.js";
+import { applySnapshot, fanOutEvents, upsertProduct } from "../services/products.js";
 
 const RANGES: Record<string, string> = {
   "24h": "24 hours",
@@ -19,6 +19,18 @@ const RANGES: Record<string, string> = {
   "90d": "90 days",
   all: "100 years",
 };
+
+/**
+ * Разбор артикула или ID продавца. Парсеры бросают понятное сообщение, и его
+ * нужно превратить в 400, а не дать всплыть до 500 с «Internal Server Error».
+ */
+function parseId<T>(raw: string, parse: (value: string) => T): { ok: true; value: T } | { ok: false; error: string } {
+  try {
+    return { ok: true, value: parse(raw) };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+}
 
 /** Единая обёртка: лимит WB → 503 с флагом degraded. */
 async function wbGuard<T>(reply: { code: (n: number) => { send: (b: unknown) => unknown } }, fn: () => Promise<T>) {
@@ -43,21 +55,21 @@ export async function catalogRoutes(app: FastifyInstance, wb: WbClient): Promise
     const params = z.object({ nm: z.string() }).safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: "Нужен артикул" });
 
-    let nm: number;
-    try {
-      nm = toNm(params.data.nm);
-    } catch (error) {
-      return reply.code(400).send({ error: (error as Error).message });
-    }
+    const parsedNm = parseId(params.data.nm, toNm);
+    if (!parsedNm.ok) return reply.code(400).send({ error: parsedNm.error });
+    const nm = parsedNm.value;
 
     const result = await wbGuard(reply, () => wb.fullProduct(nm, "interactive"));
     if (!result.ok) return;
     if (!result.value) return reply.code(404).send({ error: `Товар ${nm} не найден на Wildberries` });
 
     const product = result.value;
-    // свежий снимок кладём в историю: пользователь открыл карточку — значит цена актуальна
+    // Свежий снимок кладём в историю: пользователь открыл карточку — значит цена
+    // актуальна. События при этом обязаны уйти подписчикам: applySnapshot уже
+    // сдвинул lastPrice, и обход планировщика разницы больше не увидит.
     await upsertProduct(product);
-    await applySnapshot(product, { scheduleNext: false });
+    const events = await applySnapshot(product, { scheduleNext: false });
+    if (events.length > 0) await fanOutEvents(events);
 
     const [watch] = request.user
       ? await db
@@ -76,7 +88,9 @@ export async function catalogRoutes(app: FastifyInstance, wb: WbClient): Promise
     const query = z.object({ range: z.enum(["24h", "7d", "30d", "90d", "all"]).default("30d") }).safeParse(request.query);
     if (!params.success || !query.success) return reply.code(400).send({ error: "Некорректные параметры" });
 
-    const nm = toNm(params.data.nm);
+    const parsedNm = parseId(params.data.nm, toNm);
+    if (!parsedNm.ok) return reply.code(400).send({ error: parsedNm.error });
+    const nm = parsedNm.value;
     const interval = RANGES[query.data.range] ?? "30 days";
 
     const points = await db
@@ -109,12 +123,9 @@ export async function catalogRoutes(app: FastifyInstance, wb: WbClient): Promise
     const params = z.object({ id: z.string() }).safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: "Нужен ID продавца" });
 
-    let supplierId: number;
-    try {
-      supplierId = toSupplierId(params.data.id);
-    } catch (error) {
-      return reply.code(400).send({ error: (error as Error).message });
-    }
+    const parsedSeller = parseId(params.data.id, toSupplierId);
+    if (!parsedSeller.ok) return reply.code(400).send({ error: parsedSeller.error });
+    const supplierId = parsedSeller.value;
 
     const result = await wbGuard(reply, () => wb.seller(supplierId, "interactive"));
     if (!result.ok) return;
@@ -152,7 +163,10 @@ export async function catalogRoutes(app: FastifyInstance, wb: WbClient): Promise
     const query = z.object({ page: z.coerce.number().int().min(1).max(50).default(1) }).safeParse(request.query);
     if (!params.success || !query.success) return reply.code(400).send({ error: "Некорректные параметры" });
 
-    const supplierId = toSupplierId(params.data.id);
+    const parsedSeller = parseId(params.data.id, toSupplierId);
+    if (!parsedSeller.ok) return reply.code(400).send({ error: parsedSeller.error });
+    const supplierId = parsedSeller.value;
+
     const result = await wbGuard(reply, () => wb.sellerCatalogPage(supplierId, query.data.page, "interactive"));
     if (!result.ok) return;
 
@@ -180,7 +194,11 @@ export async function catalogRoutes(app: FastifyInstance, wb: WbClient): Promise
 
   // ── что уже есть в базе (быстрый ответ без похода в WB) ────────────────────
   app.get("/api/seller/:id/tracked", async (request, reply) => {
-    const supplierId = toSupplierId(z.object({ id: z.string() }).parse(request.params).id);
+    const params = z.object({ id: z.string() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "Нужен ID продавца" });
+    const parsedSeller = parseId(params.data.id, toSupplierId);
+    if (!parsedSeller.ok) return reply.code(400).send({ error: parsedSeller.error });
+    const supplierId = parsedSeller.value;
     const rows = await db
       .select({
         nm: products.nm,

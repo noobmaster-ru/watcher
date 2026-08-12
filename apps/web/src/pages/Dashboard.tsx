@@ -63,9 +63,9 @@ export function DashboardPage() {
 
 function ProductRow({ watch, onRemove }: { watch: Watch; onRemove: () => void }) {
   const nm = watch.nm!;
-  const image = `https://basket-01.wbbasket.ru/vol${Math.floor(nm / 100000)}/part${Math.floor(
-    nm / 1000,
-  )}/${nm}/images/c516x688/1.webp`;
+  // Ссылку на картинку считает сервер: шард CDN выбирается по таблице из 46
+  // хостов, и угадать его на клиенте нельзя — почти все превью были бы 404.
+  const image = watch.image ?? "";
 
   return (
     <div className="card flex items-center gap-4">

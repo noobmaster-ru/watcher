@@ -227,6 +227,9 @@ export class WbTransport {
         if (err && !stdout) return reject(err);
         const i = stdout.lastIndexOf("\n");
         const status = Number.parseInt(stdout.slice(i + 1), 10);
+        // При сетевом сбое (таймаут, отказ соединения, DNS, TLS) curl всё равно
+        // печатает шаблон -w, и http_code там равен 000. Это временная беда, а не
+        // ответ сервера, поэтому наружу отдаём 0 и обрабатываем как повторяемую.
         resolve({ status: Number.isNaN(status) ? 0 : status, body: stdout.slice(0, i) });
       });
     });
@@ -248,9 +251,14 @@ export class WbTransport {
     for (let attempt = 0; attempt <= retries; attempt++) {
       if (attempt > 0) await sleep(attempt * 900 + Math.floor(Math.random() * 400));
       await queue.acquire(priority);
+      // Очередь могла держать запрос минуты — за это время хост мог закрыться,
+      // поэтому предохранитель проверяем повторно, уже перед самым вызовом.
+      const blockedAfterWait = queue.blockedForMs();
+      if (blockedAfterWait > 0) throw new WbUnavailableError(host, blockedAfterWait);
       try {
         const { status, body } = await this.curl(url, timeoutSec);
-        if (status === 429 || status === 403 || status >= 500) {
+        // status 0 — сетевой сбой на стороне curl, а не ответ Wildberries
+        if (status === 0 || status === 429 || status === 403 || status >= 500) {
           queue.noteFailure(status);
           lastError = new WbHttpError(status, url);
           if (queue.blockedForMs() > 0) throw new WbUnavailableError(host, queue.blockedForMs());

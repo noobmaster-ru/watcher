@@ -63,17 +63,26 @@ export async function runPriceTick(wb: WbClient, batchSize = DETAIL_BATCH_SIZE):
     throw error;
   }
 
-  const events: PriceEvent[] = [];
   const seen = new Set<number>();
+  let created = 0;
+
   for (const snapshot of snapshots) {
     seen.add(Number(snapshot.nm));
-    events.push(...(await applySnapshot(snapshot)));
+    try {
+      // Рассылаем сразу по товару, а не копим до конца пачки. applySnapshot уже
+      // сдвинул lastPrice, поэтому событие, не разосланное сейчас, восстановить
+      // будет неоткуда: следующий тик разницы не увидит. Один сбойный товар не
+      // должен уносить с собой уведомления по остальным девяноста девяти.
+      const events: PriceEvent[] = await applySnapshot(snapshot);
+      if (events.length > 0) created += await fanOutEvents(events);
+    } catch (error) {
+      console.error(`[prices] товар ${snapshot.nm}: ${(error as Error).message}`);
+    }
   }
 
   // WB не вернул часть артикулов: товар скрыт или удалён — отодвигаем проверку
   const missing = due.filter((nm) => !seen.has(nm));
   for (const nm of missing) await markProductError(nm);
 
-  const created = await fanOutEvents(events);
   return { checked: snapshots.length, events: created, missing: missing.length, degraded: false };
 }

@@ -12,7 +12,12 @@ export async function alertRoutes(app: FastifyInstance): Promise<void> {
     const query = z
       .object({
         limit: z.coerce.number().int().min(1).max(200).default(50),
-        unreadOnly: z.coerce.boolean().default(false),
+        // z.coerce.boolean() здесь непригоден: Boolean("false") === true, а параметры
+        // строки всегда, поэтому unreadOnly=false включал бы фильтр вместо выключения
+        unreadOnly: z
+          .enum(["true", "false", "1", "0"])
+          .default("false")
+          .transform((value) => value === "true" || value === "1"),
       })
       .safeParse(request.query);
     if (!query.success) return reply.code(400).send({ error: "Некорректные параметры" });
@@ -50,7 +55,9 @@ export async function alertRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/api/alerts/read", async (request, reply) => {
-    const body = z.object({ ids: z.array(z.number()).optional() }).safeParse(request.body ?? {});
+    const body = z
+      .object({ ids: z.array(z.number().int().positive()).max(500).optional() })
+      .safeParse(request.body ?? {});
     if (!body.success) return reply.code(400).send({ error: "Некорректные данные" });
 
     const userId = request.user!.id;

@@ -83,10 +83,22 @@ export class FakeWb {
     return { products: page === 1 ? products : [], total: products.length };
   }
 
+  /** Каталог, обход которого оборвался: список неполный. */
+  setSellerCatalogIncomplete(supplierId: number, products: WbProduct[]): void {
+    this.sellerCatalogue.set(supplierId, products);
+    this.incomplete.add(supplierId);
+    for (const product of products) this.set(product);
+  }
+
+  private incomplete = new Set<number>();
+
   async sellerCatalogAll(supplierId: number | string) {
+    this.guard();
     this.calls.sellerCatalog += 1;
-    const products = this.sellerCatalogue.get(Number(supplierId)) ?? [];
-    return { products, total: products.length, pagesFetched: 1, truncated: false };
+    const id = Number(supplierId);
+    const products = this.sellerCatalogue.get(id) ?? [];
+    const complete = !this.incomplete.has(id);
+    return { products, total: products.length, pagesFetched: 1, truncated: false, complete };
   }
 
   hostStatuses() {

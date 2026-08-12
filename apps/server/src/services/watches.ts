@@ -149,7 +149,11 @@ export async function syncSellerCatalog(
     seenNms.push(nm);
     if (!knownNms.has(nm)) freshNms.push(nm);
     await upsertProduct(product);
-    await applySnapshot(product, { scheduleNext: false });
+    // Снимок из каталога — такой же источник цены, как и обход планировщика.
+    // Его события нужно разослать здесь: applySnapshot уже сдвинул lastPrice,
+    // и следующий тик разницы не увидит.
+    const events = await applySnapshot(product, { scheduleNext: false });
+    if (events.length > 0) await fanOutEvents(events);
   }
 
   if (seenNms.length > 0) {
@@ -166,18 +170,29 @@ export async function syncSellerCatalog(
     }
   }
 
-  // всё, чего не было в этом обходе, больше не продаётся у этого продавца
-  const removed = await db
-    .update(sellerProducts)
-    .set({ isActive: false })
-    .where(
-      and(
-        eq(sellerProducts.supplierId, supplierId),
-        eq(sellerProducts.isActive, true),
-        seenNms.length > 0 ? notInArray(sellerProducts.nm, seenNms) : sql`true`,
-      ),
-    )
-    .returning({ nm: sellerProducts.nm });
+  // Товары гасим, только если каталог обойдён целиком. Оборванный обход (лимит
+  // WB, 404 посреди пагинации, упор в потолок страниц) даёт неполный список, и
+  // доверять ему нельзя: иначе половина ассортимента помечается пропавшей, а на
+  // следующей синхронизации возвращается как «новые товары» — с уведомлениями.
+  const trustworthy = catalog.complete && !catalog.truncated && seenNms.length > 0;
+  const removed = trustworthy
+    ? await db
+        .update(sellerProducts)
+        .set({ isActive: false })
+        .where(
+          and(
+            eq(sellerProducts.supplierId, supplierId),
+            eq(sellerProducts.isActive, true),
+            notInArray(sellerProducts.nm, seenNms),
+          ),
+        )
+        .returning({ nm: sellerProducts.nm })
+    : [];
+  if (!trustworthy) {
+    console.error(
+      `[sellers] каталог ${supplierId} получен не полностью (страниц ${catalog.pagesFetched}, товаров ${seenNms.length}) — снятие с продажи пропущено`,
+    );
+  }
 
   await db
     .update(sellers)
@@ -192,7 +207,7 @@ export async function syncSellerCatalog(
 
   // о новинках сообщаем только при плановой пересинхронизации: в момент подписки
   // весь каталог «новый», и заваливать пользователя сотней уведомлений незачем
-  if (options.announceNew !== false && freshNms.length > 0) {
+  if (options.announceNew !== false && freshNms.length > 0 && trustworthy) {
     const rows = await db
       .select({ nm: products.nm, price: products.lastPrice })
       .from(products)
@@ -211,11 +226,28 @@ export async function removeWatch(userId: number, watchId: number): Promise<bool
     .update(watches)
     .set({ isActive: false })
     .where(and(eq(watches.id, watchId), eq(watches.userId, userId)))
-    .returning({ id: watches.id, nm: watches.nm });
+    .returning({ id: watches.id, nm: watches.nm, kind: watches.kind, supplierId: watches.supplierId });
   if (!row) return false;
+
+  // Пересчитываем не только «опрашивать или нет», но и частоту: ушедший
+  // подписчик мог быть единственным, кто просил проверять раз в 15 минут.
+  await refreshTracking(await affectedProducts(row));
   await untrackOrphans();
   return true;
 }
+
+/** Артикулы, на которые влияет изменение подписки. */
+async function affectedProducts(row: { nm: number | null; supplierId: number | null }): Promise<number[]> {
+  if (row.nm) return [row.nm];
+  if (row.supplierId === null) return [];
+  const rows = await db
+    .select({ nm: sellerProducts.nm })
+    .from(sellerProducts)
+    .where(and(eq(sellerProducts.supplierId, row.supplierId), eq(sellerProducts.isActive, true)));
+  return rows.map((r) => r.nm);
+}
+
+export { affectedProducts };
 
 /** Список подписок пользователя с текущей ценой и дельтами за сутки и неделю. */
 export async function listWatches(userId: number): Promise<Record<string, unknown>[]> {

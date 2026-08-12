@@ -13,11 +13,13 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
-    credentials: "same-origin",
-  });
+  // content-type ставим только когда тело есть. Fastify разбирает тело у любого
+  // запроса с этим заголовком, включая DELETE, и на пустом теле отвечает 400 —
+  // из-за чего отписка не работала бы вовсе.
+  const headers: Record<string, string> = { ...((init?.headers as Record<string, string>) ?? {}) };
+  if (init?.body !== undefined && !headers["content-type"]) headers["content-type"] = "application/json";
+
+  const response = await fetch(path, { ...init, headers, credentials: "same-origin" });
 
   const text = await response.text();
   const body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
@@ -100,6 +102,7 @@ export interface Watch {
   lastInStock: boolean | null;
   lastCheckedAt: string | null;
   sellerName: string | null;
+  image: string | null;
   priceDayAgo: number | null;
   priceWeekAgo: number | null;
   trackedProducts: number | null;

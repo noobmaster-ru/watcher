@@ -38,6 +38,22 @@ export async function buildApp(options: BuildOptions = {}): Promise<App> {
       log: (...args: unknown[]) => server.log.debug({ wb: args }),
     });
 
+  // Fastify разбирает тело у любого запроса с content-type: application/json,
+  // включая DELETE, и на пустом теле отвечает 400. Пустое тело при таком
+  // заголовке — обычное дело у HTTP-клиентов, поэтому трактуем его как
+  // отсутствие тела, а не как ошибку разбора.
+  server.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => {
+    const raw = typeof body === "string" ? body.trim() : "";
+    if (raw.length === 0) return done(null, undefined);
+    try {
+      done(null, JSON.parse(raw));
+    } catch (error) {
+      const failure = error as Error & { statusCode?: number };
+      failure.statusCode = 400;
+      done(failure);
+    }
+  });
+
   await server.register(cookie, { secret: config.sessionSecret });
 
   server.decorateRequest("user", null);

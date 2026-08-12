@@ -30,7 +30,7 @@ async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   console.error(`[watcher] ${signal}: останавливаюсь`);
-  scheduler.stop();
+  await scheduler.stop();
   stopPolling();
   await server.close();
   await closeDb();

@@ -164,8 +164,9 @@ export function ProductPage() {
         </div>
 
         {history.isLoading && <Spinner />}
+        {history.error != null && <ErrorBox error={history.error} />}
 
-        {chartData.length === 0 && !history.isLoading && (
+        {chartData.length === 0 && !history.isLoading && history.error == null && (
           <p className="muted py-8 text-center">
             {watchId
               ? "История пока пустая — первая точка появится после следующей проверки."

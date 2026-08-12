@@ -134,7 +134,7 @@ export class WbClient {
     supplierId: number | string,
     page = 1,
     priority: Priority = "interactive",
-  ): Promise<{ products: WbProduct[]; total: number | null }> {
+  ): Promise<{ products: WbProduct[]; total: number | null; missing: boolean }> {
     const url = new URL("https://catalog.wb.ru/sellers/v4/catalog");
     url.searchParams.set("ab_testing", "false");
     url.searchParams.set("appType", "1");
@@ -148,7 +148,8 @@ export class WbClient {
     url.searchParams.set("supplier", String(Number(supplierId)));
 
     const json = await this.transport.getJson(url.toString(), { priority });
-    return { products: parseProductList(json), total: parseTotal(json) };
+    // json === null означает 404 от WB: страницы нет, но это не «каталог кончился»
+    return { products: parseProductList(json), total: parseTotal(json), missing: json === null };
   }
 
   /** Весь каталог продавца постранично. Прерывается на первой пустой странице. */
@@ -156,26 +157,43 @@ export class WbClient {
     supplierId: number | string,
     priority: Priority = "background",
     maxPages = SELLER_MAX_PAGES,
-  ): Promise<{ products: WbProduct[]; total: number | null; pagesFetched: number; truncated: boolean }> {
+  ): Promise<{
+    products: WbProduct[];
+    total: number | null;
+    pagesFetched: number;
+    truncated: boolean;
+    /** Обход дошёл до естественного конца каталога. False — список неполный. */
+    complete: boolean;
+  }> {
     const seen = new Set<string>();
     const products: WbProduct[] = [];
     let total: number | null = null;
     let page = 1;
+    let complete = false;
 
     for (; page <= maxPages; page++) {
       const chunk = await this.sellerCatalogPage(supplierId, page, priority);
       if (total === null) total = chunk.total;
-      if (chunk.products.length === 0) break;
+
+      if (chunk.missing) break; // 404 посреди обхода — список заведомо неполный
+      if (chunk.products.length === 0) {
+        // пустая страница после непустых — обычный конец выдачи
+        complete = page > 1;
+        break;
+      }
       for (const item of chunk.products) {
         if (!seen.has(item.nm)) {
           seen.add(item.nm);
           products.push(item);
         }
       }
-      if (chunk.products.length < SELLER_PAGE_SIZE) break;
+      if (chunk.products.length < SELLER_PAGE_SIZE) {
+        complete = true; // последняя, неполная страница
+        break;
+      }
     }
 
-    return { products, total, pagesFetched: page - 1, truncated: page > maxPages };
+    return { products, total, pagesFetched: page - 1, truncated: page > maxPages, complete };
   }
 
   // ── отзывы ────────────────────────────────────────────────────────────────

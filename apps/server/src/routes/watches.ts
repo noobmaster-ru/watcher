@@ -1,12 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { WbUnavailableError, toNm, toSupplierId, type WbClient } from "@watcher/wb-core";
+import { WbUnavailableError, imageUrl, toNm, toSupplierId, type WbClient } from "@watcher/wb-core";
 import { db } from "../db/client.js";
 import { watches } from "../db/schema.js";
 import { requireAuth } from "../auth.js";
 import { config } from "../config.js";
-import { listWatches, removeWatch, watchProduct, watchSeller } from "../services/watches.js";
+import { affectedProducts, listWatches, removeWatch, watchProduct, watchSeller } from "../services/watches.js";
 import { refreshTracking, untrackOrphans } from "../services/products.js";
 
 const rules = z.object({
@@ -30,7 +30,14 @@ export async function watchRoutes(app: FastifyInstance, wb: WbClient): Promise<v
 
   app.get("/api/watches", async (request, reply) => {
     const rows = await listWatches(request.user!.id);
-    return reply.send({ watches: rows });
+    // Шард CDN с картинкой выбирается по таблице из 46 хостов — считать его
+    // должен сервер, у клиента этой таблицы нет.
+    return reply.send({
+      watches: rows.map((row) => ({
+        ...row,
+        image: row.nm != null ? imageUrl(Number(row.nm)) : null,
+      })),
+    });
   });
 
   app.post("/api/watches", async (request, reply) => {
@@ -66,15 +73,23 @@ export async function watchRoutes(app: FastifyInstance, wb: WbClient): Promise<v
     const body = rules.safeParse(request.body);
     if (!params.success || !body.success) return reply.code(400).send({ error: "Некорректные данные" });
 
+    // Все поля необязательные, поэтому пустое тело проходит проверку, но drizzle
+    // на пустом set падает. Отвечаем понятной ошибкой вместо 500.
+    if (Object.keys(body.data).length === 0) {
+      return reply.code(400).send({ error: "Не указано ни одного поля для изменения" });
+    }
+
     const [row] = await db
       .update(watches)
       .set(body.data)
       .where(and(eq(watches.id, params.data.id), eq(watches.userId, request.user!.id)))
-      .returning({ id: watches.id, nm: watches.nm });
+      .returning({ id: watches.id, nm: watches.nm, kind: watches.kind, supplierId: watches.supplierId });
     if (!row) return reply.code(404).send({ error: "Подписка не найдена" });
 
-    // интервал мог измениться — пересчитываем темп опроса товара
-    if (row.nm) await refreshTracking([row.nm]);
+    // Интервал мог измениться. У подписки на продавца nm пустой, поэтому темп
+    // пересчитываем по всем товарам его каталога, иначе правка ничего не меняла бы.
+    const affected = await affectedProducts(row);
+    if (affected.length > 0) await refreshTracking(affected);
     return reply.send({ ok: true });
   });
 

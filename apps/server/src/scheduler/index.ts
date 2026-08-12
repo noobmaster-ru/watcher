@@ -15,6 +15,8 @@ const log = (...args: unknown[]) => console.error("[scheduler]", ...args);
 export class Scheduler {
   private timers: NodeJS.Timeout[] = [];
   private stopped = false;
+  /** Задачи, выполняющиеся прямо сейчас: их нужно дождаться при остановке. */
+  private inFlight = new Set<Promise<void>>();
 
   constructor(private readonly wb: WbClient) {}
 
@@ -54,10 +56,14 @@ export class Scheduler {
   private every(intervalMs: number, name: string, task: () => Promise<void>): void {
     const run = async (): Promise<void> => {
       if (this.stopped) return;
+      const running = task().catch((error: Error) => {
+        log(`${name}: ${error.message}`);
+      });
+      this.inFlight.add(running);
       try {
-        await task();
-      } catch (error) {
-        log(`${name}: ${(error as Error).message}`);
+        await running;
+      } finally {
+        this.inFlight.delete(running);
       }
       if (this.stopped) return;
       const timer = setTimeout(run, intervalMs);
@@ -69,9 +75,14 @@ export class Scheduler {
     this.timers.push(first);
   }
 
-  stop(): void {
+  /**
+   * Останавливает планировщик и дожидается текущих задач. Без ожидания перезапуск
+   * контейнера посреди тика обрывал бы рассылку уже вычисленных уведомлений.
+   */
+  async stop(): Promise<void> {
     this.stopped = true;
     for (const timer of this.timers) clearTimeout(timer);
     this.timers = [];
+    await Promise.allSettled([...this.inFlight]);
   }
 }
