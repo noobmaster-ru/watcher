@@ -147,6 +147,99 @@ export const pricePoints = pgTable(
   }),
 );
 
+/**
+ * Ежедневный срез по продавцу. История цен есть у каждого товара, но по
+ * продавцу целиком её собрать неоткуда: каталог меняется, товары появляются и
+ * исчезают. Срез отвечает на вопрос «что было у продавца на такую-то дату».
+ */
+export const sellerSnapshots = pgTable(
+  "seller_snapshots",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    supplierId: integer("supplier_id").notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+    productCount: integer("product_count").notNull(),
+    inStockCount: integer("in_stock_count").notNull(),
+    minPrice: integer("min_price"),
+    maxPrice: integer("max_price"),
+    avgPrice: integer("avg_price"),
+  },
+  (t) => ({
+    historyIdx: index("seller_snapshots_supplier_idx").on(t.supplierId, t.capturedAt),
+  }),
+);
+
+// ── ключевые слова и позиции ──────────────────────────────────────────────────
+/** Поисковый запрос, по которому отслеживаются позиции товаров пользователя. */
+export const keywords = pgTable(
+  "keywords",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    phrase: text("phrase").notNull(),
+    isActive: boolean("is_active").notNull().default(true),
+    /** Сколько страниц выдачи просматривать: на странице 100 товаров. */
+    maxPages: integer("max_pages").notNull().default(3),
+    intervalMin: integer("interval_min").notNull().default(360),
+    nextCheckAt: timestamp("next_check_at", { withTimezone: true }).notNull().defaultNow(),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    /** Сколько всего товаров WB отдал по запросу в последний раз. */
+    lastTotal: integer("last_total"),
+    errorCount: integer("error_count").notNull().default(0),
+    createdAt: now(),
+  },
+  (t) => ({
+    userIdx: index("keywords_user_idx").on(t.userId),
+    scheduleIdx: index("keywords_schedule_idx").on(t.nextCheckAt).where(sql`${t.isActive}`),
+    uniquePhrase: uniqueIndex("keywords_user_phrase_idx").on(t.userId, t.phrase),
+  }),
+);
+
+/**
+ * Позиция товара в выдаче по запросу. position = null означает, что товар из
+ * выдачи выпал: такие строки пишутся только для тех артикулов, что были найдены
+ * в прошлый раз, иначе на каждую проверку добавлялись бы сотни пустых строк.
+ */
+export const keywordPositions = pgTable(
+  "keyword_positions",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    keywordId: integer("keyword_id")
+      .notNull()
+      .references(() => keywords.id, { onDelete: "cascade" }),
+    nm: bigint("nm", { mode: "number" }).notNull(),
+    position: integer("position"),
+    page: integer("page"),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    historyIdx: index("keyword_positions_keyword_checked_idx").on(t.keywordId, t.checkedAt),
+    nmIdx: index("keyword_positions_nm_idx").on(t.nm),
+  }),
+);
+
+// ── выгрузка в Google Таблицы ────────────────────────────────────────────────
+/**
+ * Таблица пользователя. Курсоры хранят, до какой строки данные уже выгружены:
+ * при каждом прогоне дописываются только новые, иначе таблица переписывалась бы
+ * целиком и быстро упёрлась бы в квоты Google.
+ */
+export const userSheets = pgTable("user_sheets", {
+  userId: integer("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  spreadsheetId: text("spreadsheet_id").notNull(),
+  spreadsheetUrl: text("spreadsheet_url").notNull(),
+  cursorPricePoint: bigint("cursor_price_point", { mode: "number" }).notNull().default(0),
+  cursorKeywordPosition: bigint("cursor_keyword_position", { mode: "number" }).notNull().default(0),
+  cursorSellerSnapshot: bigint("cursor_seller_snapshot", { mode: "number" }).notNull().default(0),
+  lastExportAt: timestamp("last_export_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  createdAt: now(),
+});
+
 // ── подписки и уведомления ───────────────────────────────────────────────────
 export const watchKinds = ["product", "seller"] as const;
 export type WatchKind = (typeof watchKinds)[number];
@@ -236,6 +329,16 @@ export const alertsRelations = relations(alerts, ({ one }) => ({
   user: one(users, { fields: [alerts.userId], references: [users.id] }),
   product: one(products, { fields: [alerts.nm], references: [products.nm] }),
   watch: one(watches, { fields: [alerts.watchId], references: [watches.id] }),
+}));
+
+export const keywordsRelations = relations(keywords, ({ one, many }) => ({
+  user: one(users, { fields: [keywords.userId], references: [users.id] }),
+  positions: many(keywordPositions),
+}));
+
+export const keywordPositionsRelations = relations(keywordPositions, ({ one }) => ({
+  keyword: one(keywords, { fields: [keywordPositions.keywordId], references: [keywords.id] }),
+  product: one(products, { fields: [keywordPositions.nm], references: [products.nm] }),
 }));
 
 export const productsRelations = relations(products, ({ one, many }) => ({

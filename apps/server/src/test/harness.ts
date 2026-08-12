@@ -52,8 +52,18 @@ export class FakeWb {
     return nms.map((nm) => this.catalogue.get(String(nm))).filter((p): p is WbProduct => Boolean(p));
   }
 
+  /** Выдача по конкретной фразе; порядок важен — из него берётся позиция. */
+  private searchResults = new Map<string, WbProduct[]>();
+
+  setSearchResults(phrase: string, products: WbProduct[]): void {
+    this.searchResults.set(phrase.toLowerCase(), products);
+    for (const product of products) this.set(product);
+  }
+
   async search(query: string, limit = 24): Promise<WbProduct[]> {
     this.guard();
+    const prepared = this.searchResults.get(query.toLowerCase());
+    if (prepared) return prepared.slice(0, limit);
     return [...this.catalogue.values()].slice(0, limit);
   }
 
@@ -111,5 +121,57 @@ export class FakeWb {
 
   overallState() {
     return "ok" as const;
+  }
+}
+
+/** Подставной Google: запоминает всё, что в него написали, вместо похода в сеть. */
+export class FakeGoogle {
+  spreadsheets = new Map<string, Map<string, Array<Array<string | number | null>>>>();
+  shared: Array<{ spreadsheetId: string; email: string }> = [];
+  private counter = 0;
+  /** Когда выставлено, любой вызов падает — так проверяется обработка отказа. */
+  failWith: Error | null = null;
+
+  private guard(): void {
+    if (this.failWith) throw this.failWith;
+  }
+
+  async createSpreadsheet(title: string, sheets: string[]) {
+    this.guard();
+    this.counter += 1;
+    const spreadsheetId = `sheet-${this.counter}`;
+    this.spreadsheets.set(spreadsheetId, new Map(sheets.map((name) => [name, []])));
+    return { spreadsheetId, spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`, title };
+  }
+
+  async shareWithEmail(spreadsheetId: string, email: string) {
+    this.guard();
+    this.shared.push({ spreadsheetId, email });
+  }
+
+  async ensureSheets(spreadsheetId: string, sheets: string[]) {
+    this.guard();
+    const book = this.spreadsheets.get(spreadsheetId);
+    if (!book) throw new Error(`нет таблицы ${spreadsheetId}`);
+    for (const name of sheets) if (!book.has(name)) book.set(name, []);
+  }
+
+  async appendRows(spreadsheetId: string, sheet: string, rows: Array<Array<string | number | null>>) {
+    this.guard();
+    const book = this.spreadsheets.get(spreadsheetId);
+    if (!book) throw new Error(`нет таблицы ${spreadsheetId}`);
+    const existing = book.get(sheet) ?? [];
+    book.set(sheet, [...existing, ...rows]);
+    return rows.length;
+  }
+
+  async clearSheet(spreadsheetId: string, sheet: string) {
+    this.guard();
+    this.spreadsheets.get(spreadsheetId)?.set(sheet, []);
+  }
+
+  /** Строки листа без строки заголовков. */
+  rows(spreadsheetId: string, sheet: string): Array<Array<string | number | null>> {
+    return (this.spreadsheets.get(spreadsheetId)?.get(sheet) ?? []).slice(1);
   }
 }

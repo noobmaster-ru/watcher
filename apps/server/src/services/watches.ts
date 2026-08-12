@@ -8,7 +8,7 @@
 import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
 import type { WbClient } from "@watcher/wb-core";
 import { db, rowsOf } from "../db/client.js";
-import { alerts, products, sellerProducts, sellers, watches, type WatchKind } from "../db/schema.js";
+import { alerts, products, sellerProducts, sellerSnapshots, sellers, watches, type WatchKind } from "../db/schema.js";
 import { config } from "../config.js";
 import { applySnapshot, fanOutEvents, refreshTracking, untrackOrphans, upsertProduct } from "./products.js";
 
@@ -191,6 +191,8 @@ export async function syncSellerCatalog(
     );
   }
 
+  await captureSellerSnapshot(supplierId, seenNms);
+
   await db
     .update(sellers)
     .set({
@@ -215,6 +217,35 @@ export async function syncSellerCatalog(
   }
 
   return { total: seenNms.length, added: freshNms.length, removed: removed.length, truncated: catalog.truncated };
+}
+
+/**
+ * Записывает срез по продавцу: сколько товаров, сколько в наличии, разброс цен.
+ * История цен есть у каждого товара, но по продавцу целиком её собрать неоткуда —
+ * каталог меняется, и без среза нельзя ответить, что у него было месяц назад.
+ */
+async function captureSellerSnapshot(supplierId: number, nms: number[]): Promise<void> {
+  if (nms.length === 0) return;
+  const [stats] = await db
+    .select({
+      total: sql<number>`count(*)::int`,
+      inStock: sql<number>`count(*) filter (where ${products.lastInStock})::int`,
+      min: sql<number | null>`min(${products.lastPrice})::int`,
+      max: sql<number | null>`max(${products.lastPrice})::int`,
+      avg: sql<number | null>`round(avg(${products.lastPrice}))::int`,
+    })
+    .from(products)
+    .where(inArray(products.nm, nms));
+  if (!stats) return;
+
+  await db.insert(sellerSnapshots).values({
+    supplierId,
+    productCount: stats.total,
+    inStockCount: stats.inStock,
+    minPrice: stats.min,
+    maxPrice: stats.max,
+    avgPrice: stats.avg,
+  });
 }
 
 /** Отписка: подписка деактивируется, товары без подписчиков перестают опрашиваться. */

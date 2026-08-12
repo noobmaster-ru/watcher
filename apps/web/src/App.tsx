@@ -9,6 +9,8 @@ import { ProductPage } from "./pages/Product";
 import { SellerPage } from "./pages/Seller";
 import { AlertsPage } from "./pages/Alerts";
 import { SettingsPage } from "./pages/Settings";
+import { KeywordsPage } from "./pages/Keywords";
+import { SheetButton } from "./components/SheetButton";
 
 interface Me {
   user: { id: number; email: string };
@@ -47,6 +49,7 @@ export function App() {
           <Route path="/add" element={<AddPage />} />
           <Route path="/product/:nm" element={<ProductPage />} />
           <Route path="/seller/:id" element={<SellerPage />} />
+          <Route path="/keywords" element={<KeywordsPage />} />
           <Route path="/alerts" element={<AlertsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
@@ -88,6 +91,7 @@ function Header({ email }: { email: string }) {
         <nav className="flex flex-1 flex-wrap gap-1 text-sm">
           <Tab to="/">Отслеживание</Tab>
           <Tab to="/add">Добавить</Tab>
+          <Tab to="/keywords">Ключевые слова</Tab>
           <Tab to="/alerts">
             События
             {(alerts.data?.unread ?? 0) > 0 && (
@@ -96,6 +100,7 @@ function Header({ email }: { email: string }) {
               </span>
             )}
           </Tab>
+          <SheetButton />
           <Tab to="/settings">Настройки</Tab>
         </nav>
 

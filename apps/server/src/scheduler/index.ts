@@ -8,6 +8,9 @@ import { config } from "../config.js";
 import { purgeExpiredSessions } from "../auth.js";
 import { runPriceTick } from "./prices.js";
 import { runSellerTick } from "./sellers.js";
+import { runKeywordTick } from "./keywords.js";
+import { exportUser, usersToExport } from "../services/export.js";
+import type { GoogleApi } from "../services/google.js";
 
 const log = (...args: unknown[]) => console.error("[scheduler]", ...args);
 
@@ -17,7 +20,10 @@ export class Scheduler {
   /** Задачи, выполняющиеся прямо сейчас: их нужно дождаться при остановке. */
   private inFlight = new Set<Promise<void>>();
 
-  constructor(private readonly wb: WbClient) {}
+  constructor(
+    private readonly wb: WbClient,
+    private readonly google: GoogleApi | null = null,
+  ) {}
 
   start(): void {
     if (!config.scheduler.enabled) {
@@ -41,6 +47,29 @@ export class Scheduler {
       }
     });
 
+
+    // Позиции — по одному запросу за раз: search.wb.ru лимитирует жёстче всех,
+    // и жадный обход стоил бы блокировки поиска целиком, включая интерфейс.
+    this.every(3 * 60_000, "позиции", async () => {
+      const result = await runKeywordTick(this.wb);
+      if (result.checked > 0) log(`позиции: запросов ${result.checked}, найдено ${result.positions}`);
+    });
+
+    if (this.google) {
+      this.every(config.google.exportIntervalMin * 60_000, "выгрузка", async () => {
+        for (const userId of await usersToExport()) {
+          try {
+            const result = await exportUser(this.google as GoogleApi, userId);
+            const total = result.products + result.sellers + result.keywords;
+            if (total > 0) log(`выгрузка пользователя ${userId}: строк ${total}`);
+          } catch (error) {
+            log(`выгрузка пользователя ${userId}: ${(error as Error).message}`);
+          }
+        }
+      });
+    } else {
+      log("выгрузка в Google Таблицы выключена: не задан GOOGLE_SERVICE_ACCOUNT");
+    }
 
     this.every(24 * 3600_000, "сессии", async () => {
       await purgeExpiredSessions();

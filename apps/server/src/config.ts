@@ -62,12 +62,22 @@ export const config = {
   },
 
 
+  google: {
+    /** JSON сервисного аккаунта целиком либо путь к файлу с ним. */
+    serviceAccount: process.env.GOOGLE_SERVICE_ACCOUNT?.trim() || undefined,
+    /** Как часто дописывать данные в таблицы, минут. */
+    exportIntervalMin: num("SHEETS_EXPORT_INTERVAL_MIN", 60),
+  },
+
   /** Минимальный и максимальный интервал проверки, который можно выставить в интерфейсе. */
   limits: {
     minIntervalMin: 15,
     maxIntervalMin: 24 * 60,
     /** Потолок товаров, которые тянем из каталога одного продавца. */
     maxSellerProducts: 5000,
+    /** Границы интервала проверки позиций по ключевым словам, минут. */
+    minKeywordIntervalMin: 60,
+    maxKeywordIntervalMin: 24 * 60,
   },
 } as const;
 

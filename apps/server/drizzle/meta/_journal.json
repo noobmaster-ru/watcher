@@ -15,6 +15,13 @@
       "when": 1786566586627,
       "tag": "0001_orange_invisible_woman",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786568072098,
+      "tag": "0002_real_dark_beast",
+      "breakpoints": true
     }
   ]
 }

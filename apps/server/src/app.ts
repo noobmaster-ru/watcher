@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cookie from "@fastify/cookie";
 import { WbClient } from "@watcher/wb-core";
+import { GoogleSheetsApi, loadServiceAccount, type GoogleApi } from "./services/google.js";
 import { config } from "./config.js";
 import { loadUser } from "./auth.js";
 import { authRoutes } from "./routes/auth.js";
@@ -9,15 +10,21 @@ import { catalogRoutes } from "./routes/catalog.js";
 import { watchRoutes } from "./routes/watches.js";
 import { alertRoutes } from "./routes/alerts.js";
 import { settingsRoutes } from "./routes/settings.js";
+import { keywordRoutes } from "./routes/keywords.js";
+import { exportRoutes } from "./routes/export.js";
 
 export interface App {
   server: FastifyInstance;
   wb: WbClient;
+  /** null, когда ключ сервисного аккаунта не задан: выгрузка просто выключена. */
+  google: GoogleApi | null;
 }
 
 export interface BuildOptions {
   /** Готовый клиент WB. Тесты подставляют сюда подставной, чтобы не ходить в сеть. */
   wb?: WbClient;
+  /** Готовый клиент Google. Тесты подставляют подставной вместо настоящего API. */
+  google?: GoogleApi | null;
 }
 
 export async function buildApp(options: BuildOptions = {}): Promise<App> {
@@ -54,6 +61,9 @@ export async function buildApp(options: BuildOptions = {}): Promise<App> {
     }
   });
 
+  const account = loadServiceAccount(config.google.serviceAccount);
+  const google = options.google !== undefined ? options.google : account ? new GoogleSheetsApi(account) : null;
+
   await server.register(cookie, { secret: config.sessionSecret });
 
   server.decorateRequest("user", null);
@@ -64,6 +74,8 @@ export async function buildApp(options: BuildOptions = {}): Promise<App> {
   await server.register(async (instance) => catalogRoutes(instance, wb));
   await server.register(async (instance) => watchRoutes(instance, wb));
   await server.register(alertRoutes);
+  await server.register(async (instance) => keywordRoutes(instance, wb));
+  await server.register(async (instance) => exportRoutes(instance, google));
   await server.register(settingsRoutes);
 
   server.setNotFoundHandler((request, reply) => {
@@ -72,5 +84,5 @@ export async function buildApp(options: BuildOptions = {}): Promise<App> {
     return reply.code(404).send({ error: "Not found" });
   });
 
-  return { server, wb };
+  return { server, wb, google };
 }
