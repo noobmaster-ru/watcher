@@ -1,0 +1,17 @@
+{
+  "name": "@watcher/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": { "watcher-wb-mcp": "./dist/index.js" },
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.13.0",
+    "@watcher/wb-core": "*",
+    "zod": "^3.24.1"
+  }
+}

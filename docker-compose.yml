@@ -1,0 +1,72 @@
+# Боевой стенд: Postgres + приложение + Caddy.
+#
+# Рассчитано на VPS в РФ: Wildberries лимитирует зарубежные и дата-центровые
+# адреса заметно жёстче. Если сервер всё же вне РФ, укажите WB_PROXY в .env —
+# все запросы к WB пойдут через российский прокси.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-watcher}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-watcher}
+      POSTGRES_DB: ${POSTGRES_DB:-watcher}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-watcher}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER:-watcher}:${POSTGRES_PASSWORD:-watcher}@postgres:5432/${POSTGRES_DB:-watcher}
+      PORT: 3000
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost}
+      SESSION_SECRET: ${SESSION_SECRET:?нужен SESSION_SECRET, сгенерируйте openssl rand -hex 32}
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
+      WB_DEST: ${WB_DEST:--1257786}
+      WB_SPP: ${WB_SPP:-30}
+      WB_PROXY: ${WB_PROXY:-}
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
+      DEFAULT_CHECK_INTERVAL_MIN: ${DEFAULT_CHECK_INTERVAL_MIN:-60}
+      SELLER_SYNC_INTERVAL_HOURS: ${SELLER_SYNC_INTERVAL_HOURS:-12}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_MODE: ${TELEGRAM_MODE:-webhook}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/api/health > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

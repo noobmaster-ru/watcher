@@ -1,0 +1,24 @@
+# Адрес задаётся переменной SITE_ADDRESS в .env:
+#   SITE_ADDRESS=watcher.example.com  → Caddy сам получит сертификат Let's Encrypt
+#   SITE_ADDRESS=:80                  → без TLS, для локальной проверки
+{$SITE_ADDRESS:localhost} {
+	encode gzip zstd
+
+	# API уходит в контейнер приложения
+	handle /api/* {
+		reverse_proxy app:3000
+	}
+
+	# всё остальное — статика SPA; неизвестные пути отдают index.html,
+	# иначе перезагрузка страницы вида /product/242678284 даст 404
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

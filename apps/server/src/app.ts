@@ -1,0 +1,60 @@
+import Fastify, { type FastifyInstance } from "fastify";
+import cookie from "@fastify/cookie";
+import { WbClient } from "@watcher/wb-core";
+import { config } from "./config.js";
+import { loadUser } from "./auth.js";
+import { authRoutes } from "./routes/auth.js";
+import { healthRoutes } from "./routes/health.js";
+import { catalogRoutes } from "./routes/catalog.js";
+import { watchRoutes } from "./routes/watches.js";
+import { alertRoutes } from "./routes/alerts.js";
+import { settingsRoutes } from "./routes/settings.js";
+
+export interface App {
+  server: FastifyInstance;
+  wb: WbClient;
+}
+
+export interface BuildOptions {
+  /** Готовый клиент WB. Тесты подставляют сюда подставной, чтобы не ходить в сеть. */
+  wb?: WbClient;
+}
+
+export async function buildApp(options: BuildOptions = {}): Promise<App> {
+  const server = Fastify({
+    logger: config.isProduction ? true : { transport: undefined, level: "warn" },
+    trustProxy: true,
+  });
+
+  // один клиент WB на процесс: в нём живут очереди и предохранители, и делить
+  // их между запросами обязательно — иначе лимиты считаются вразнобой
+  const wb =
+    options.wb ??
+    new WbClient({
+      dest: config.wb.dest,
+      spp: config.wb.spp,
+      proxy: config.wb.proxy,
+      netInterface: config.wb.netInterface,
+      log: (...args: unknown[]) => server.log.debug({ wb: args }),
+    });
+
+  await server.register(cookie, { secret: config.sessionSecret });
+
+  server.decorateRequest("user", null);
+  server.addHook("preHandler", loadUser);
+
+  await server.register(async (instance) => healthRoutes(instance, wb));
+  await server.register(authRoutes);
+  await server.register(async (instance) => catalogRoutes(instance, wb));
+  await server.register(async (instance) => watchRoutes(instance, wb));
+  await server.register(alertRoutes);
+  await server.register(settingsRoutes);
+
+  server.setNotFoundHandler((request, reply) => {
+    if (request.url.startsWith("/api/")) return reply.code(404).send({ error: "Метод не найден" });
+    // остальное отдаёт Caddy (статика SPA); сюда запрос долетает только в разработке
+    return reply.code(404).send({ error: "Not found" });
+  });
+
+  return { server, wb };
+}

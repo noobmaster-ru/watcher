@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.local
+caddy_data/
+caddy_config/
+pgdata/
+.DS_Store

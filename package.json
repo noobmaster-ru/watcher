@@ -1,0 +1,30 @@
+{
+  "name": "watcher",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Wildberries price watcher: web app + MCP server over a shared WB parsing core",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @watcher/wb-core && npm run build -w @watcher/server && npm run build -w @watcher/mcp && npm run build -w @watcher/web",
+    "dev:server": "npm run dev -w @watcher/server",
+    "dev:web": "npm run dev -w @watcher/web",
+    "check:endpoints": "npm run check:endpoints -w @watcher/wb-core",
+    "db:generate": "npm run db:generate -w @watcher/server",
+    "db:migrate": "npm run db:migrate -w @watcher/server",
+    "typecheck": "tsc -b --pretty packages/wb-core apps/server apps/mcp",
+    "test": "npm run test -w @watcher/server",
+    "check:live": "npm run check:live -w @watcher/server"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2"
+  }
+}

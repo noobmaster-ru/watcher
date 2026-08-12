@@ -1,0 +1,79 @@
+import type { FastifyInstance } from "fastify";
+import { eq } from "drizzle-orm";
+import { z } from "zod";
+import { db } from "../db/client.js";
+import { users } from "../db/schema.js";
+import { config } from "../config.js";
+import {
+  SESSION_COOKIE,
+  clearSessionCookie,
+  createSession,
+  destroySession,
+  hashPassword,
+  setSessionCookie,
+  verifyPassword,
+} from "../auth.js";
+
+const credentials = z.object({
+  email: z.string().email("Некорректный email").max(255),
+  password: z.string().min(8, "Пароль от 8 символов").max(200),
+});
+
+export async function authRoutes(app: FastifyInstance): Promise<void> {
+  app.post("/api/auth/register", async (request, reply) => {
+    if (!config.allowRegistration) {
+      return reply.code(403).send({ error: "Регистрация закрыта" });
+    }
+    const parsed = credentials.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? "Некорректные данные" });
+    }
+
+    const email = parsed.data.email.toLowerCase().trim();
+    const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+    if (existing) return reply.code(409).send({ error: "Пользователь с таким email уже есть" });
+
+    const [user] = await db
+      .insert(users)
+      .values({ email, passwordHash: await hashPassword(parsed.data.password) })
+      .returning({ id: users.id, email: users.email });
+    if (!user) return reply.code(500).send({ error: "Не удалось создать пользователя" });
+
+    const session = await createSession(user.id);
+    setSessionCookie(reply, session.token, session.expiresAt, config.isProduction);
+    return reply.send({ user });
+  });
+
+  app.post("/api/auth/login", async (request, reply) => {
+    const parsed = credentials.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Введите email и пароль" });
+
+    const email = parsed.data.email.toLowerCase().trim();
+    const [user] = await db
+      .select({ id: users.id, email: users.email, passwordHash: users.passwordHash })
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+
+    // одинаковый ответ на «нет пользователя» и «неверный пароль» — чтобы по нему
+    // нельзя было перебрать, кто зарегистрирован
+    if (!user || !(await verifyPassword(parsed.data.password, user.passwordHash))) {
+      return reply.code(401).send({ error: "Неверный email или пароль" });
+    }
+
+    const session = await createSession(user.id);
+    setSessionCookie(reply, session.token, session.expiresAt, config.isProduction);
+    return reply.send({ user: { id: user.id, email: user.email } });
+  });
+
+  app.post("/api/auth/logout", async (request, reply) => {
+    await destroySession(request.cookies[SESSION_COOKIE]);
+    clearSessionCookie(reply);
+    return reply.send({ ok: true });
+  });
+
+  app.get("/api/me", async (request, reply) => {
+    if (!request.user) return reply.code(401).send({ error: "Нужна авторизация" });
+    return reply.send({ user: request.user, allowRegistration: config.allowRegistration });
+  });
+}
