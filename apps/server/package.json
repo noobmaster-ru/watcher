@@ -11,7 +11,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --env-file-if-exists=../../.env --import tsx src/db/migrate.ts",
     "test": "node --import tsx --test src/test/*.test.ts",
-    "check:live": "node --import tsx src/test/live.ts"
+    "check:live": "node --import tsx src/test/live.ts",
+    "user": "node --env-file-if-exists=../../.env --import tsx src/scripts/user.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

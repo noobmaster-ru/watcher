@@ -274,3 +274,57 @@ describe("лимиты Wildberries", () => {
     assert.equal(response.statusCode, 200);
   });
 });
+
+describe("смена пароля", () => {
+  it("требует верный текущий пароль и гасит прочие сессии", async () => {
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "user@example.com", password: "supersecret" },
+    });
+    const sessionA = String(first.headers["set-cookie"]).split(";")[0]!;
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "user@example.com", password: "supersecret" },
+    });
+    const sessionB = String(second.headers["set-cookie"]).split(";")[0]!;
+
+    const wrong = await app.inject({
+      method: "POST",
+      url: "/api/auth/password",
+      headers: { cookie: sessionA },
+      payload: { current: "неверный", next: "новыйпароль123" },
+    });
+    assert.equal(wrong.statusCode, 401);
+
+    const ok = await app.inject({
+      method: "POST",
+      url: "/api/auth/password",
+      headers: { cookie: sessionA },
+      payload: { current: "supersecret", next: "новыйпароль123" },
+    });
+    assert.equal(ok.statusCode, 200);
+
+    // текущая сессия жива, вторая — оборвана
+    const stillHere = await app.inject({ method: "GET", url: "/api/me", headers: { cookie: sessionA } });
+    assert.equal(stillHere.statusCode, 200);
+    const killed = await app.inject({ method: "GET", url: "/api/me", headers: { cookie: sessionB } });
+    assert.equal(killed.statusCode, 401, "чужая сессия должна быть погашена");
+
+    // вход по новому паролю работает, по старому — нет
+    const oldPassword = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "user@example.com", password: "supersecret" },
+    });
+    assert.equal(oldPassword.statusCode, 401);
+    const newPassword = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "user@example.com", password: "новыйпароль123" },
+    });
+    assert.equal(newPassword.statusCode, 200);
+  });
+});

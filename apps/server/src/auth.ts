@@ -6,7 +6,7 @@
 
 import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import { and, eq, gt, lt } from "drizzle-orm";
+import { and, eq, gt, lt, ne } from "drizzle-orm";
 import type { FastifyReply, FastifyRequest } from "fastify";
 // побочный импорт: подключает типы request.cookies / reply.setCookie
 import "@fastify/cookie";
@@ -65,6 +65,12 @@ export async function resolveSession(token: string | undefined): Promise<AuthUse
 export async function destroySession(token: string | undefined): Promise<void> {
   if (!token) return;
   await db.delete(sessions).where(eq(sessions.tokenHash, hashToken(token)));
+}
+
+/** Гасит все сессии пользователя, кроме текущей. Вызывается при смене пароля. */
+export async function destroyOtherSessions(userId: number, keepToken: string | undefined): Promise<void> {
+  const keep = keepToken ? hashToken(keepToken) : "";
+  await db.delete(sessions).where(and(eq(sessions.userId, userId), ne(sessions.tokenHash, keep)));
 }
 
 /** Чистка протухших сессий — вызывается планировщиком раз в сутки. */

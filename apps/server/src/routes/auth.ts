@@ -6,6 +6,8 @@ import { users } from "../db/schema.js";
 import { config } from "../config.js";
 import {
   SESSION_COOKIE,
+  destroyOtherSessions,
+  requireAuth,
   clearSessionCookie,
   createSession,
   destroySession,
@@ -69,6 +71,34 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post("/api/auth/logout", async (request, reply) => {
     await destroySession(request.cookies[SESSION_COOKIE]);
     clearSessionCookie(reply);
+    return reply.send({ ok: true });
+  });
+
+  app.post("/api/auth/password", { preHandler: requireAuth }, async (request, reply) => {
+    const parsed = z
+      .object({ current: z.string().min(1), next: z.string().min(8, "Новый пароль от 8 символов").max(200) })
+      .safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? "Некорректные данные" });
+    }
+
+    const userId = request.user!.id;
+    const [user] = await db
+      .select({ passwordHash: users.passwordHash })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!user || !(await verifyPassword(parsed.data.current, user.passwordHash))) {
+      return reply.code(401).send({ error: "Текущий пароль неверен" });
+    }
+
+    await db
+      .update(users)
+      .set({ passwordHash: await hashPassword(parsed.data.next) })
+      .where(eq(users.id, userId));
+
+    // остальные сессии гасим: сменил пароль — значит, чужой доступ надо оборвать
+    await destroyOtherSessions(userId, request.cookies[SESSION_COOKIE]);
     return reply.send({ ok: true });
   });
 

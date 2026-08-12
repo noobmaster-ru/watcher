@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Health } from "../lib/api";
 import { ErrorBox, Spinner } from "../components/ui";
@@ -77,6 +78,8 @@ export function SettingsPage() {
         </p>
       </section>
 
+      <ChangePassword />
+
       <section className="card space-y-2">
         <h2 className="font-semibold">Состояние сервисов</h2>
         {health.isLoading && <Spinner />}
@@ -98,6 +101,73 @@ export function SettingsPage() {
         )}
       </section>
     </div>
+  );
+}
+
+function ChangePassword() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [done, setDone] = useState(false);
+
+  const change = useMutation({
+    mutationFn: () => api.post("/api/auth/password", { current, next }),
+    onSuccess: () => {
+      setCurrent("");
+      setNext("");
+      setDone(true);
+    },
+  });
+
+  return (
+    <section className="card space-y-3">
+      <h2 className="font-semibold">Смена пароля</h2>
+      <form
+        className="space-y-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setDone(false);
+          change.mutate();
+        }}
+      >
+        <div>
+          <label className="label" htmlFor="current">
+            Текущий пароль
+          </label>
+          <input
+            id="current"
+            type="password"
+            className="input"
+            value={current}
+            onChange={(event) => setCurrent(event.target.value)}
+            required
+            autoComplete="current-password"
+          />
+        </div>
+        <div>
+          <label className="label" htmlFor="next">
+            Новый пароль
+          </label>
+          <input
+            id="next"
+            type="password"
+            className="input"
+            value={next}
+            onChange={(event) => setNext(event.target.value)}
+            required
+            minLength={8}
+            autoComplete="new-password"
+          />
+          <p className="muted mt-1">Минимум 8 символов. Остальные сессии будут завершены.</p>
+        </div>
+
+        {change.error != null && <ErrorBox error={change.error} />}
+        {done && <p className="text-sm text-emerald-600">Пароль изменён.</p>}
+
+        <button className="btn-primary" disabled={change.isPending || !current || next.length < 8}>
+          {change.isPending ? "…" : "Сменить пароль"}
+        </button>
+      </form>
+    </section>
   );
 }
 
