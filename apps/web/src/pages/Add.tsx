@@ -104,37 +104,87 @@ function AddSeller() {
   const navigate = useNavigate();
   const [value, setValue] = useState("");
 
-  return (
-    <form
-      className="card space-y-3"
-      onSubmit={(event) => {
-        event.preventDefault();
-        const match = value.trim().match(/seller\/(\d+)/) ?? value.trim().match(/(\d+)/);
-        if (match?.[1]) navigate(`/seller/${match[1]}`);
-      }}
-    >
-      <div>
-        <label className="label" htmlFor="seller">
-          ID продавца или ссылка на его страницу
-        </label>
-        <input
-          id="seller"
-          className="input"
-          placeholder="809881 или https://www.wildberries.ru/seller/809881"
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          required
-        />
-        <p className="muted mt-1">
-          Откроется страница продавца: там можно посмотреть каталог и поставить на отслеживание весь ассортимент или
-          отдельные товары.
-        </p>
-      </div>
+  const resolve = useMutation({
+    mutationFn: (input: string) =>
+      api.get<{
+        supplierId: number | null;
+        name: string | null;
+        source: string;
+        query?: string;
+        productName?: string;
+        candidates?: Array<{ supplierId: number; name: string; products: number }>;
+      }>(`/api/seller/resolve?input=${encodeURIComponent(input)}`),
+    onSuccess: (data) => {
+      if (data.supplierId) navigate(`/seller/${data.supplierId}`);
+    },
+  });
 
-      <button className="btn-primary" disabled={!value.trim()}>
-        Открыть продавца
-      </button>
-    </form>
+  const candidates = resolve.data?.candidates ?? [];
+
+  return (
+    <div className="space-y-4">
+      <form
+        className="card space-y-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          resolve.mutate(value.trim());
+        }}
+      >
+        <div>
+          <label className="label" htmlFor="seller">
+            Продавец: ID, ссылка на страницу или на любой его товар
+          </label>
+          <input
+            id="seller"
+            className="input"
+            placeholder="wildberries.ru/seller/shampur-yug"
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            required
+          />
+          <p className="muted mt-1">
+            Подходит и числовой адрес (<code>/seller/809881</code>), и буквенный (
+            <code>/seller/shampur-yug</code>). Буквенный Wildberries по своему API не отдаёт, поэтому продавец
+            ищется по названию — если совпадение неточное, покажу варианты. Самый надёжный способ: вставить
+            ссылку на любой товар этого продавца.
+          </p>
+        </div>
+
+        {resolve.error != null && <ErrorBox error={resolve.error} />}
+
+        <button className="btn-primary" disabled={resolve.isPending || !value.trim()}>
+          {resolve.isPending ? "Ищу продавца…" : "Найти продавца"}
+        </button>
+      </form>
+
+      {resolve.isPending && <Spinner label="Спрашиваю Wildberries…" />}
+
+      {candidates.length > 0 && (
+        <div className="card space-y-3">
+          <div>
+            <p className="font-medium">Точного совпадения нет — выберите продавца</p>
+            <p className="muted">
+              Искал по запросу «{resolve.data?.query}». Если нужного нет в списке, вставьте ссылку на любой
+              товар этого продавца — тогда он определится точно.
+            </p>
+          </div>
+          <div className="space-y-2">
+            {candidates.map((candidate) => (
+              <button
+                key={candidate.supplierId}
+                onClick={() => navigate(`/seller/${candidate.supplierId}`)}
+                className="btn-ghost w-full justify-between"
+              >
+                <span>{candidate.name}</span>
+                <span className="muted">
+                  ID {candidate.supplierId} · {candidate.products} товаров в выдаче
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

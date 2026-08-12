@@ -8,6 +8,7 @@
 
 import { WbTransport, WbUnavailableError } from "./transport.js";
 import { cardJsonUrl, crc16Arc } from "./urls.js";
+import { deslugify, slugify } from "./translit.js";
 import { parseCardInfo, parseFeedbacks, parseProductList, parseSeller, parseTotal } from "./parse.js";
 import type { HostState, HostStatus, Priority, WbCardInfo, WbConfig, WbProduct, WbReviews, WbSeller } from "./types.js";
 
@@ -231,6 +232,47 @@ export class WbClient {
     }
 
     return { products, total, pagesFetched: page - 1, truncated: page > maxPages, complete };
+  }
+
+  /**
+   * Ищет продавца по буквенному адресу страницы (/seller/shampur-yug).
+   *
+   * Прямого способа нет: страница закрыта JS-челленджем, а supplier-by-id
+   * принимает только числа. Поэтому адрес расшифровывается в русский запрос,
+   * по нему берётся выдача поиска, и продавцы из неё проверяются обратно —
+   * совпадение засчитывается, только если имя сворачивается ровно в тот же
+   * адрес. Всё остальное отдаётся как список кандидатов: угадывать за
+   * пользователя, за каким продавцом он собрался следить, неправильно.
+   */
+  async resolveSellerBySlug(
+    slug: string,
+    priority: Priority = "interactive",
+  ): Promise<{
+    query: string;
+    exact: { supplierId: number; name: string } | null;
+    candidates: Array<{ supplierId: number; name: string; products: number }>;
+  }> {
+    const normalized = slug.trim().toLowerCase();
+    const query = deslugify(normalized);
+    if (!query) return { query, exact: null, candidates: [] };
+
+    const items = await this.search(query, 100, priority);
+
+    const bySupplier = new Map<number, { supplierId: number; name: string; products: number }>();
+    for (const item of items) {
+      if (!item.supplierId || !item.supplier) continue;
+      const found = bySupplier.get(item.supplierId);
+      if (found) found.products += 1;
+      else bySupplier.set(item.supplierId, { supplierId: item.supplierId, name: item.supplier, products: 1 });
+    }
+
+    const candidates = [...bySupplier.values()].sort((a, b) => b.products - a.products);
+    const exact = candidates.find((c) => slugify(c.name) === normalized);
+    return {
+      query,
+      exact: exact ? { supplierId: exact.supplierId, name: exact.name } : null,
+      candidates,
+    };
   }
 
   // ── отзывы ────────────────────────────────────────────────────────────────

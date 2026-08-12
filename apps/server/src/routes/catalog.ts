@@ -7,7 +7,7 @@
 import type { FastifyInstance } from "fastify";
 import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
-import { WbUnavailableError, toNm, toSupplierId, type WbClient } from "@watcher/wb-core";
+import { WbUnavailableError, looksLikeSlug, toNm, toSupplierId, type WbClient } from "@watcher/wb-core";
 import { db } from "../db/client.js";
 import { pricePoints, products, sellerProducts, sellers, watches } from "../db/schema.js";
 import { applySnapshot, fanOutEvents, upsertProduct } from "../services/products.js";
@@ -115,6 +115,76 @@ export async function catalogRoutes(app: FastifyInstance, wb: WbClient): Promise
         max: prices.length > 0 ? Math.max(...prices) : null,
         current: points.at(-1)?.price ?? null,
       },
+    });
+  });
+
+  /**
+   * Превращает то, что вставил пользователь, в ID продавца.
+   *
+   * Принимает: число, ссылку /seller/809881, ссылку /seller/shampur-yug с
+   * буквенным адресом и ссылку на любой товар продавца. Последнее — самый
+   * надёжный путь: артикул даёт продавца точно, без догадок. Буквенный адрес
+   * ищется поиском и подтверждается обратной свёрткой имени; если уверенного
+   * совпадения нет, возвращается список кандидатов, а выбор остаётся за
+   * пользователем.
+   */
+  app.get("/api/seller/resolve", async (request, reply) => {
+    const query = z.object({ input: z.string().min(1).max(300) }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: "Укажите ID, ссылку на продавца или на его товар" });
+
+    const raw = query.data.input.trim();
+    const sellerLink = raw.match(/seller\/([^/?#]+)/i);
+    const productLink = /catalog\/(\d+)/i.test(raw);
+    const token = (sellerLink?.[1] ?? raw).trim();
+
+    // 1. Ссылка на товар — продавец берётся из карточки, без поиска и догадок
+    if (productLink || (!sellerLink && /^\d{7,}$/.test(token))) {
+      const result = await wbGuard(reply, () => wb.detail(toNm(raw), "interactive"));
+      if (!result.ok) return;
+      if (result.value?.supplierId) {
+        return reply.send({
+          supplierId: result.value.supplierId,
+          name: result.value.supplier,
+          source: "product",
+          productName: result.value.name,
+        });
+      }
+      // не товар — пробуем дальше как ID продавца
+    }
+
+    // 2. Число — это ID продавца
+    if (/^\d+$/.test(token)) {
+      const result = await wbGuard(reply, () => wb.seller(Number(token), "interactive"));
+      if (!result.ok) return;
+      if (result.value) {
+        return reply.send({ supplierId: result.value.supplierId, name: result.value.name, source: "id" });
+      }
+      return reply.code(404).send({ error: `Продавец ${token} не найден на Wildberries` });
+    }
+
+    // 3. Буквенный адрес — поиск с подтверждением
+    if (!looksLikeSlug(token)) {
+      return reply.code(400).send({ error: "Не похоже ни на ID продавца, ни на ссылку" });
+    }
+
+    const result = await wbGuard(reply, () => wb.resolveSellerBySlug(token, "interactive"));
+    if (!result.ok) return;
+
+    if (result.value.exact) {
+      return reply.send({ ...result.value.exact, source: "slug", query: result.value.query });
+    }
+    if (result.value.candidates.length > 0) {
+      return reply.send({
+        supplierId: null,
+        source: "slug",
+        query: result.value.query,
+        candidates: result.value.candidates.slice(0, 8),
+      });
+    }
+    return reply.code(404).send({
+      error:
+        `По адресу «${token}» продавец не найден. Откройте любой его товар и вставьте ссылку на товар — ` +
+        `так продавец определится точно.`,
     });
   });
 
