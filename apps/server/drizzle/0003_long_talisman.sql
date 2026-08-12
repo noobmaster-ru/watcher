@@ -1,0 +1,1 @@
+ALTER TABLE "keywords" ALTER COLUMN "max_pages" SET DEFAULT 1;

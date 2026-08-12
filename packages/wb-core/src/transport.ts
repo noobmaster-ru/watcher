@@ -16,9 +16,16 @@ import type { HostState, HostStatus, Priority, WbConfig } from "./types.js";
 const UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-/** Минимальный интервал между запросами к хосту, мс. Подобрано по поведению WB. */
+/**
+ * Минимальный интервал между запросами к хосту, мс. Подобрано по поведению WB.
+ *
+ * У поиска пауза на порядок больше остальных, и это не перестраховка: замер с
+ * боевого сервера показал 429 на всех запросах подряд даже с паузой в пять
+ * секунд, причём штраф держится и после прекращения нагрузки. Поиск WB терпит
+ * редкие обращения, но не серии.
+ */
 const HOST_GAP_MS: Record<string, number> = {
-  "search.wb.ru": 2000,
+  "search.wb.ru": 30_000,
   "catalog.wb.ru": 2000,
   "card.wb.ru": 500,
   "feedback-bt.wildberries.ru": 700,
@@ -38,6 +45,16 @@ const TRIP_AFTER_FAILURES = 3;
 const BANNED_AFTER_FAILURES = 8;
 const BASE_BACKOFF_MS = 5_000;
 const MAX_BACKOFF_MS = 5 * 60_000;
+
+/**
+ * Хосты, у которых штраф за превышение держится долго. Для них пауза после
+ * серии отказов считается от минут, а не от секунд: пятисекундный бэкофф на
+ * поиске приводил к тому, что клиент продолжал долбиться в закрытую дверь и
+ * продлевал себе же блокировку.
+ */
+const SLOW_RECOVERY_HOSTS = new Set(["search.wb.ru"]);
+const SLOW_BASE_BACKOFF_MS = 5 * 60_000;
+const SLOW_MAX_BACKOFF_MS = 60 * 60_000;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -136,9 +153,11 @@ class HostQueue {
     this.lastStatus = status;
     this.lastErrorAt = Date.now();
     if (this.failures >= TRIP_AFTER_FAILURES) {
+      const slow = SLOW_RECOVERY_HOSTS.has(this.host);
+      const base = slow ? SLOW_BASE_BACKOFF_MS : BASE_BACKOFF_MS;
+      const max = slow ? SLOW_MAX_BACKOFF_MS : MAX_BACKOFF_MS;
       const over = this.failures - TRIP_AFTER_FAILURES;
-      const backoff = Math.min(BASE_BACKOFF_MS * 2 ** over, MAX_BACKOFF_MS);
-      this.blockedUntil = Date.now() + backoff;
+      this.blockedUntil = Date.now() + Math.min(base * 2 ** over, max);
     }
   }
 

@@ -180,8 +180,12 @@ export const keywords = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     phrase: text("phrase").notNull(),
     isActive: boolean("is_active").notNull().default(true),
-    /** Сколько страниц выдачи просматривать: на странице 100 товаров. */
-    maxPages: integer("max_pages").notNull().default(3),
+    /**
+     * Сколько страниц выдачи просматривать: на странице 100 товаров. По
+     * умолчанию одна — каждая следующая это отдельный запрос к search.wb.ru,
+     * самому строгому хосту Wildberries.
+     */
+    maxPages: integer("max_pages").notNull().default(1),
     intervalMin: integer("interval_min").notNull().default(360),
     nextCheckAt: timestamp("next_check_at", { withTimezone: true }).notNull().defaultNow(),
     lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),

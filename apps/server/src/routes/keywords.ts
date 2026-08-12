@@ -38,7 +38,7 @@ export async function keywordRoutes(app: FastifyInstance, wb: WbClient): Promise
       .values({
         userId: request.user!.id,
         phrase,
-        maxPages: parsed.data.maxPages ?? 3,
+        maxPages: parsed.data.maxPages ?? 1,
         intervalMin: parsed.data.intervalMin ?? 360,
       })
       .onConflictDoUpdate({
@@ -54,7 +54,7 @@ export async function keywordRoutes(app: FastifyInstance, wb: WbClient): Promise
         id: row.id,
         userId: request.user!.id,
         phrase,
-        maxPages: parsed.data.maxPages ?? 3,
+        maxPages: parsed.data.maxPages ?? 1,
         intervalMin: parsed.data.intervalMin ?? 360,
       });
       return reply.send({ id: row.id, ...result });
