@@ -14,6 +14,15 @@ import type { HostState, HostStatus, Priority, WbCardInfo, WbConfig, WbProduct, 
 /** Сколько артикулов влезает в один запрос карточки. Проверено: 100 отдаёт 200 OK. */
 export const DETAIL_BATCH_SIZE = 100;
 
+/**
+ * Хосты, отдающие карточки с ценами. Путь у них одинаковый, ответ тоже, но WB
+ * блокирует их по IP выборочно: с московского VPS card.wb.ru отвечает 403
+ * (Angie отдаёт заглушку), а catalog.wb.ru с того же адреса — 200. Поэтому
+ * ходим по списку и запоминаем тот, который ответил; иначе приложение,
+ * работающее на ноутбуке, на сервере не получит ни одной цены.
+ */
+export const DETAIL_HOSTS = ["card.wb.ru", "catalog.wb.ru", "u-card.wb.ru"] as const;
+
 /** Потолок страниц при обходе каталога продавца — защита от бесконечной пагинации. */
 const SELLER_MAX_PAGES = 50;
 /** WB отдаёт до 100 товаров на страницу каталога. */
@@ -27,6 +36,8 @@ export class WbClient {
   readonly transport: WbTransport;
   readonly dest: string;
   readonly spp: string;
+  /** Хост карточек, ответивший последним. С него и начинаем следующий запрос. */
+  private detailHost: string = DETAIL_HOSTS[0];
 
   constructor(options: WbClientOptions = {}) {
     this.dest = options.dest ?? "-1257786"; // Москва
@@ -101,15 +112,41 @@ export class WbClient {
     const result: WbProduct[] = [];
     for (let i = 0; i < unique.length; i += DETAIL_BATCH_SIZE) {
       const chunk = unique.slice(i, i + DETAIL_BATCH_SIZE);
-      const url = new URL("https://card.wb.ru/cards/v4/detail");
-      url.searchParams.set("appType", "1");
-      url.searchParams.set("curr", "rub");
-      url.searchParams.set("dest", this.dest);
-      url.searchParams.set("spp", this.spp);
-      url.searchParams.set("nm", chunk.join(";"));
-      result.push(...parseProductList(await this.transport.getJson(url.toString(), { priority })));
+      const query =
+        `appType=1&curr=rub&dest=${encodeURIComponent(this.dest)}` +
+        `&spp=${encodeURIComponent(this.spp)}&nm=${chunk.join(";")}`;
+      result.push(...parseProductList(await this.getDetailJson(query, priority)));
     }
     return result;
+  }
+
+  /**
+   * Запрашивает карточки, перебирая хосты. Хост, закрытый лимитом или отдавший
+   * ошибку, пропускается; если ответил не первый — запоминаем его, чтобы не
+   * упираться в блокировку на каждом запросе.
+   */
+  private async getDetailJson(query: string, priority: Priority): Promise<unknown> {
+    const ordered = [this.detailHost, ...DETAIL_HOSTS.filter((h) => h !== this.detailHost)];
+    let lastError: unknown = null;
+
+    for (const host of ordered) {
+      try {
+        const json = await this.transport.getJson(`https://${host}/cards/v4/detail?${query}`, {
+          priority,
+          retries: host === ordered[ordered.length - 1] ? 3 : 1,
+        });
+        this.detailHost = host;
+        return json;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError ?? new Error("не удалось получить карточки ни с одного хоста Wildberries");
+  }
+
+  /** Хост карточек, с которого пришёл последний удачный ответ. Для диагностики. */
+  activeDetailHost(): string {
+    return this.detailHost;
   }
 
   async detail(nm: number | string, priority: Priority = "interactive"): Promise<WbProduct | null> {

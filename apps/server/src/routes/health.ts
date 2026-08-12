@@ -21,7 +21,7 @@ export async function healthRoutes(app: FastifyInstance, wb: WbClient): Promise<
     const hosts = wb.hostStatuses();
     return reply.code(database === "ok" ? 200 : 503).send({
       database,
-      wb: { state: wb.overallState(), hosts },
+      wb: { state: wb.overallState(), detailHost: wb.activeDetailHost(), hosts },
       telegram: isTelegramEnabled() ? "on" : "off",
       time: new Date().toISOString(),
     });
