@@ -58,9 +58,11 @@ export async function watchRoutes(app: FastifyInstance, wb: WbClient): Promise<v
       return reply.send({ ...result, kind: "seller", supplierId });
     } catch (error) {
       if (error instanceof WbUnavailableError) {
+        const minutes = Math.ceil(error.retryAfterMs / 60_000);
         return reply.code(503).send({
-          error: "Wildberries временно ограничивает запросы. Попробуйте через минуту.",
+          error: `Wildberries ограничивает запросы к ${error.host}. Ждать ${minutes <= 1 ? "меньше минуты" : `около ${minutes} мин`}.`,
           degraded: true,
+          retryAfterMs: error.retryAfterMs,
         });
       }
       return reply.code(400).send({ error: (error as Error).message });

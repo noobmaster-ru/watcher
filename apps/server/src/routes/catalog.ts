@@ -38,8 +38,12 @@ async function wbGuard<T>(reply: { code: (n: number) => { send: (b: unknown) => 
     return { ok: true as const, value: await fn() };
   } catch (error) {
     if (error instanceof WbUnavailableError) {
+      // Называем реальную паузу: у поиска она измеряется минутами, и обещание
+      // «попробуйте через минуту» было бы обманом.
+      const minutes = Math.ceil(error.retryAfterMs / 60_000);
+      const wait = minutes <= 1 ? "меньше минуты" : `около ${minutes} мин`;
       reply.code(503).send({
-        error: "Wildberries временно ограничивает запросы. Попробуйте через минуту.",
+        error: `Wildberries ограничивает запросы к ${error.host}. Ждать ${wait}.`,
         degraded: true,
         retryAfterMs: error.retryAfterMs,
       });
