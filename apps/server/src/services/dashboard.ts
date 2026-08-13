@@ -48,13 +48,40 @@ export interface ProductSeries {
 
 const isoDay = (date: Date): string => date.toISOString().slice(0, 10);
 
-/** Последние DAYS дат, включая сегодняшнюю. */
-export function dayRange(today = new Date()): string[] {
+/**
+ * Окно дней: от первого наблюдения до сегодня, но не длиннее DAYS.
+ *
+ * Раньше окно всегда было в шестьдесят дней, и у свежей подписки витрина
+ * начиналась с полусотни пустых колонок — данные ютились в последней. Пустые
+ * дни до начала наблюдений не несут никакого смысла.
+ */
+export function dayRange(today = new Date(), firstObservation?: Date | null): string[] {
+  const oldest = new Date(today.getTime() - (DAYS - 1) * 86_400_000);
+  const start = firstObservation && firstObservation > oldest ? firstObservation : oldest;
+
   const days: string[] = [];
-  for (let i = DAYS - 1; i >= 0; i--) {
-    days.push(isoDay(new Date(today.getTime() - i * 86_400_000)));
+  for (let cursor = new Date(isoDay(start)); isoDay(cursor) <= isoDay(today); cursor = new Date(cursor.getTime() + 86_400_000)) {
+    days.push(isoDay(cursor));
   }
   return days;
+}
+
+/** Самое раннее наблюдение по товарам пользователя. */
+export async function firstObservation(userId: number): Promise<Date | null> {
+  const rows = rowsOf<{ first: string | null }>(
+    await db.execute(sql`
+      select min(pp.checked_at) as first
+        from price_points pp
+        join products p on p.nm = pp.nm
+       where exists (
+         select 1 from watches w
+          where w.user_id = ${userId} and w.is_active
+            and (w.nm = pp.nm or (w.supplier_id is not null and w.supplier_id = p.supplier_id))
+       )
+    `),
+  );
+  const value = rows[0]?.first;
+  return value ? new Date(value) : null;
 }
 
 /**

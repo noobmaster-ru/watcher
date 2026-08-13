@@ -97,8 +97,11 @@ export async function upsertProduct(product: WbProduct): Promise<void> {
         supplierName: product.supplier,
         root: product.root ? Number(product.root) : null,
         pics: product.pics,
-        rating: product.rating,
-        reviews: product.reviews,
+        // Рейтинг и отзывы приходят не из каждого ответа WB: каталог продавца
+        // часто отдаёт нули. Затирать ими известное значение нельзя — в витрине
+        // получалось «★ 0» у товара с рейтингом 4.9.
+        rating: sql`coalesce(nullif(${product.rating ?? null}::real, 0), ${products.rating})`,
+        reviews: sql`coalesce(nullif(${product.reviews ?? null}::int, 0), ${products.reviews})`,
       },
     });
 }

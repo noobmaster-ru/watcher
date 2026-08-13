@@ -15,6 +15,7 @@ import {
   buildSummaryGrid,
   columnName,
   dayRange,
+  firstObservation,
   loadSeries,
   ownProducts,
 } from "./dashboard.js";
@@ -362,7 +363,7 @@ function layoutRequests(sheetId: number, frozenColumns: number, headerRow: numbe
 
 /** Перерисовывает сводку и личные листы товаров. */
 export async function refreshDashboards(api: GoogleApi, userId: number, spreadsheetId: string): Promise<number> {
-  const days = dayRange();
+  const days = dayRange(new Date(), await firstObservation(userId));
   const series = await loadSeries(userId, days);
   if (series.length === 0) return 0;
 

@@ -181,3 +181,18 @@ describe("отписка", () => {
     assert.equal(product?.isTracked, false);
   });
 });
+
+describe("рейтинг и отзывы", () => {
+  it("не затираются нулями из каталога продавца", async () => {
+    const { upsertProduct } = await import("../services/products.js");
+    const nm = 950000001;
+
+    await upsertProduct(makeProduct({ nm: String(nm), rating: 4.9, reviews: 1057 }));
+    // каталог продавца часто отдаёт нули вместо рейтинга
+    await upsertProduct(makeProduct({ nm: String(nm), rating: 0, reviews: 0 }));
+
+    const [row] = await db.select().from(products).where(eq(products.nm, nm));
+    assert.equal(row?.rating, 4.9, "известный рейтинг должен пережить пустой ответ");
+    assert.equal(row?.reviews, 1057);
+  });
+});

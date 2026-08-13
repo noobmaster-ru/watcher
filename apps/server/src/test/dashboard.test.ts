@@ -126,3 +126,22 @@ describe("лист одного товара", () => {
     assert.equal(grid[5]?.[6], 1960);
   });
 });
+
+describe("окно дней", () => {
+  it("начинается с первого наблюдения, а не с пустоты", () => {
+    // у свежей подписки витрина иначе начиналась бы полусотней пустых колонок
+    const range = dayRange(new Date("2026-08-13T10:00:00Z"), new Date("2026-08-11T07:00:00Z"));
+    assert.deepEqual(range, ["2026-08-11", "2026-08-12", "2026-08-13"]);
+  });
+
+  it("не растягивается дальше предела читаемости", () => {
+    const range = dayRange(new Date("2026-08-13T10:00:00Z"), new Date("2020-01-01T00:00:00Z"));
+    assert.equal(range.length, 60);
+    assert.equal(range[range.length - 1], "2026-08-13");
+  });
+
+  it("без истории показывает последние дни", () => {
+    const range = dayRange(new Date("2026-08-13T10:00:00Z"), null);
+    assert.equal(range.length, 60);
+  });
+});
