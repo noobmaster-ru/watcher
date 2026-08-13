@@ -298,6 +298,32 @@ export async function usersToExport(): Promise<number[]> {
 /** Ширина колонки, пикселей. */
 const COL = { photo: 70, wide: 240, normal: 110, day: 58 };
 
+/** Формат «01.08» для колонок с днями и узкая ширина под них. */
+function dayColumnRequests(sheetId: number, headerRow: number, firstDayIndex: number, dayCount: number): unknown[] {
+  return [
+    {
+      repeatCell: {
+        range: {
+          sheetId,
+          startRowIndex: headerRow - 1,
+          endRowIndex: headerRow,
+          startColumnIndex: firstDayIndex,
+          endColumnIndex: firstDayIndex + dayCount,
+        },
+        cell: { userEnteredFormat: { numberFormat: { type: "DATE", pattern: "dd.MM" }, horizontalAlignment: "CENTER" } },
+        fields: "userEnteredFormat(numberFormat,horizontalAlignment)",
+      },
+    },
+    {
+      updateDimensionProperties: {
+        range: { sheetId, dimension: "COLUMNS", startIndex: firstDayIndex, endIndex: firstDayIndex + dayCount },
+        properties: { pixelSize: COL.day },
+        fields: "pixelSize",
+      },
+    },
+  ];
+}
+
 /**
  * Оформление витрины: шапка закреплена и выделена, левые колонки закреплены
  * (иначе при росте вправо непонятно, чей это ряд), строки повыше — под фото.
@@ -355,6 +381,7 @@ export async function refreshDashboards(api: GoogleApi, userId: number, spreadsh
   if (summaryId !== undefined) {
     await api.formatSheet(spreadsheetId, [
       ...layoutRequests(summaryId, 5, 1, 72),
+      ...dayColumnRequests(summaryId, 1, 9, days.length),
       {
         updateDimensionProperties: {
           range: { sheetId: summaryId, dimension: "COLUMNS", startIndex: 2, endIndex: 3 },
@@ -374,6 +401,7 @@ export async function refreshDashboards(api: GoogleApi, userId: number, spreadsh
     if (sheetId !== undefined) {
       await api.formatSheet(spreadsheetId, [
         ...layoutRequests(sheetId, 6, 4, 24),
+        ...dayColumnRequests(sheetId, 4, 6, days.length),
         {
           updateDimensionProperties: {
             range: { sheetId, dimension: "ROWS", startIndex: 0, endIndex: 3 },
