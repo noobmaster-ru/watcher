@@ -5,9 +5,9 @@
 // таблицу целиком нельзя: история растёт непрерывно, и уже через месяц каждый
 // прогон гонял бы десятки тысяч строк, упираясь в квоты Google.
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db, rowsOf } from "../db/client.js";
-import { userSheets } from "../db/schema.js";
+import { userSheets, type Marketplace } from "../db/schema.js";
 import type { GoogleApi } from "./google.js";
 import {
   SHEET_SUMMARY,
@@ -23,8 +23,14 @@ import {
 export const SHEET_PRODUCTS = "Товары";
 export const SHEET_SELLERS = "Продавцы";
 export const SHEET_KEYWORDS = "Ключевые слова";
-/** Служебные листы: сюда история дописывается строками. */
+/** Служебные листы Wildberries: сюда история дописывается строками. */
 export const SHEETS = [SHEET_PRODUCTS, SHEET_SELLERS, SHEET_KEYWORDS];
+
+/**
+ * Листы Яндекс Маркета. Их меньше: у Маркета нет ни продавцов с каталогами, ни
+ * позиций по ключевым словам — только товары и их цены.
+ */
+export const YM_SHEETS = [SHEET_PRODUCTS];
 
 const HEADERS: Record<string, string[]> = {
   [SHEET_PRODUCTS]: [
@@ -87,24 +93,26 @@ export async function linkSpreadsheet(
   api: GoogleApi,
   userId: number,
   input: string,
+  marketplace: Marketplace = "wb",
 ): Promise<{ spreadsheetId: string; spreadsheetUrl: string; title: string }> {
   const spreadsheetId = parseSpreadsheetId(input);
 
   // Читаем таблицу: это одновременно и проверка, что доступ действительно выдан.
   const meta = await api.describe(spreadsheetId);
-  await api.ensureSheets(spreadsheetId, SHEETS);
+  const sheets = marketplace === "ym" ? YM_SHEETS : SHEETS;
+  await api.ensureSheets(spreadsheetId, sheets);
 
   // Заголовки проставляем только в пустые листы, чтобы не портить чужую разметку.
-  for (const sheet of SHEETS) {
+  for (const sheet of sheets) {
     const header = await api.firstRow(spreadsheetId, sheet);
     if (header.length === 0) await api.appendRows(spreadsheetId, sheet, [HEADERS[sheet] as string[]]);
   }
 
   await db
     .insert(userSheets)
-    .values({ userId, spreadsheetId, spreadsheetUrl: meta.url })
+    .values({ userId, marketplace, spreadsheetId, spreadsheetUrl: meta.url })
     .onConflictDoUpdate({
-      target: userSheets.userId,
+      target: [userSheets.userId, userSheets.marketplace],
       set: {
         spreadsheetId,
         spreadsheetUrl: meta.url,
@@ -123,11 +131,16 @@ export async function linkSpreadsheet(
 export async function ensureSpreadsheet(
   api: GoogleApi,
   userId: number,
+  marketplace: Marketplace = "wb",
 ): Promise<{ spreadsheetId: string; spreadsheetUrl: string }> {
-  const [existing] = await db.select().from(userSheets).where(eq(userSheets.userId, userId)).limit(1);
+  const [existing] = await db
+    .select()
+    .from(userSheets)
+    .where(and(eq(userSheets.userId, userId), eq(userSheets.marketplace, marketplace)))
+    .limit(1);
   if (!existing) throw new SheetNotLinkedError(api.email);
 
-  await api.ensureSheets(existing.spreadsheetId, SHEETS);
+  await api.ensureSheets(existing.spreadsheetId, marketplace === "ym" ? YM_SHEETS : SHEETS);
   return { spreadsheetId: existing.spreadsheetId, spreadsheetUrl: existing.spreadsheetUrl };
 }
 

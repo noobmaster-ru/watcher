@@ -1,3 +1,6 @@
+// Границы значений в ручке отметки прочитанного. Раньше здесь был отладочный
+// файл, который только печатал ответы; он и вскрыл, что огромный id доходит до
+// Postgres и превращается в 500.
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import type { FastifyInstance } from "fastify";
@@ -12,17 +15,20 @@ let cookie = "";
 before(async () => {
   const created = await createTestDb();
   close = created.close;
-  const built = await buildApp({ wb: new FakeWb() as unknown as WbClient });
-  app = built.server;
+  app = (await buildApp({ wb: new FakeWb() as unknown as WbClient, google: null })).server;
   await app.ready();
-  const r = await app.inject({
+
+  await app.inject({
     method: "POST",
     url: "/api/auth/register",
-    payload: { email: "repro@example.com", password: "supersecret" },
+    payload: { email: "bounds@example.com", password: "supersecret" },
   });
-  const setCookie = r.headers["set-cookie"];
-  const raw = Array.isArray(setCookie) ? setCookie[0]! : String(setCookie);
-  cookie = raw.split(";")[0]!;
+  const login = await app.inject({
+    method: "POST",
+    url: "/api/auth/login",
+    payload: { email: "bounds@example.com", password: "supersecret" },
+  });
+  cookie = String(login.headers["set-cookie"]).split(";")[0]!;
 });
 
 after(async () => {
@@ -30,35 +36,29 @@ after(async () => {
   await close();
 });
 
-describe("repro", () => {
-  it("fractional ids", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/alerts/read",
-      headers: { cookie },
-      payload: { ids: [1.5] },
-    });
-    console.log("STATUS", res.statusCode);
-    console.log("BODY", res.body);
+describe("отметка событий прочитанными", () => {
+  const read = (ids: unknown) =>
+    app.inject({ method: "POST", url: "/api/alerts/read", headers: { cookie }, payload: { ids } });
+
+  it("строка вместо числа — 400", async () => {
+    assert.equal((await read(["x"])).statusCode, 400);
   });
-  it("string ids", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/alerts/read",
-      headers: { cookie },
-      payload: { ids: ["x"] },
-    });
-    console.log("STR STATUS", res.statusCode);
-    console.log("STR BODY", res.body);
+
+  it("число за пределами разрядности — 400, а не 500", async () => {
+    // 1e30 проходит проверки «целое» и «положительное», но столбец bigint такого не примет
+    assert.equal((await read([1e30])).statusCode, 400);
   });
-  it("huge ids", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/alerts/read",
-      headers: { cookie },
-      payload: { ids: [1e30] },
-    });
-    console.log("HUGE STATUS", res.statusCode);
-    console.log("HUGE BODY", res.body);
+
+  it("дробное — 400", async () => {
+    assert.equal((await read([1.5])).statusCode, 400);
+  });
+
+  it("нормальные значения принимаются", async () => {
+    assert.equal((await read([1, 2, 3])).statusCode, 200);
+  });
+
+  it("пустое тело отмечает всё прочитанным", async () => {
+    const response = await app.inject({ method: "POST", url: "/api/alerts/read", headers: { cookie } });
+    assert.equal(response.statusCode, 200);
   });
 });

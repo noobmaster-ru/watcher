@@ -29,6 +29,13 @@
       "when": 1786569645297,
       "tag": "0003_long_talisman",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786655063562,
+      "tag": "0004_cuddly_vertigo",
+      "breakpoints": true
     }
   ]
 }

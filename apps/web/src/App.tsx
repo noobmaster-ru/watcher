@@ -10,6 +10,7 @@ import { SellerPage } from "./pages/Seller";
 import { AlertsPage } from "./pages/Alerts";
 import { SettingsPage } from "./pages/Settings";
 import { KeywordsPage } from "./pages/Keywords";
+import { MarketPage } from "./pages/Market";
 import { SheetButton } from "./components/SheetButton";
 
 interface Me {
@@ -49,6 +50,7 @@ export function App() {
           <Route path="/add" element={<AddPage />} />
           <Route path="/product/:nm" element={<ProductPage />} />
           <Route path="/seller/:id" element={<SellerPage />} />
+          <Route path="/market" element={<MarketPage />} />
           <Route path="/keywords" element={<KeywordsPage />} />
           <Route path="/alerts" element={<AlertsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
@@ -98,6 +100,7 @@ function Header({ email }: { email: string }) {
         <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <Tab to="/">Отслеживание</Tab>
           <Tab to="/add">Добавить</Tab>
+          <Tab to="/market">Яндекс Маркет</Tab>
           <Tab to="/keywords">Ключевые слова</Tab>
           <Tab to="/alerts">
             События

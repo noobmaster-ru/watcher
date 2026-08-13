@@ -224,6 +224,81 @@ export const keywordPositions = pgTable(
   }),
 );
 
+// ── Яндекс Маркет ─────────────────────────────────────────────────────────────
+// Отдельные таблицы, а не общая с Wildberries с колонкой площадки: у Маркета
+// другой идентификатор (sku вместо артикула), нет продавцов и каталогов, и цены
+// снимаются по одной, а не пачками. Общая таблица заставила бы половину полей
+// стоять пустыми, а живую боевую схему — переезжать. Роднит площадки только
+// форма истории цен, и её достаточно продублировать.
+
+export const ymProducts = pgTable(
+  "ym_products",
+  {
+    /** Номер товарного предложения. Именно по нему Маркет находит цену. */
+    sku: text("sku").primaryKey(),
+    name: text("name"),
+    image: text("image"),
+    url: text("url"),
+    description: text("description"),
+
+    lastPrice: integer("last_price"),
+    lastInStock: boolean("last_in_stock"),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    lastPointAt: timestamp("last_point_at", { withTimezone: true }),
+
+    isTracked: boolean("is_tracked").notNull().default(false),
+    checkIntervalMin: integer("check_interval_min").notNull().default(60),
+    nextCheckAt: timestamp("next_check_at", { withTimezone: true }).notNull().defaultNow(),
+    errorCount: integer("error_count").notNull().default(0),
+    createdAt: now(),
+  },
+  (t) => ({
+    scheduleIdx: index("ym_products_schedule_idx").on(t.nextCheckAt).where(sql`${t.isTracked}`),
+  }),
+);
+
+export const ymPricePoints = pgTable(
+  "ym_price_points",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    sku: text("sku")
+      .notNull()
+      .references(() => ymProducts.sku, { onDelete: "cascade" }),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+    price: integer("price"),
+    inStock: boolean("in_stock").notNull(),
+  },
+  (t) => ({
+    historyIdx: index("ym_price_points_sku_checked_idx").on(t.sku, t.checkedAt),
+  }),
+);
+
+export const ymWatches = pgTable(
+  "ym_watches",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sku: text("sku")
+      .notNull()
+      .references(() => ymProducts.sku, { onDelete: "cascade" }),
+    title: text("title"),
+    intervalMin: integer("interval_min").notNull().default(60),
+    minChangePct: integer("min_change_pct").notNull().default(1),
+    minChangeAbs: integer("min_change_abs").notNull().default(0),
+    onDrop: boolean("on_drop").notNull().default(true),
+    onRise: boolean("on_rise").notNull().default(false),
+    onStockChange: boolean("on_stock_change").notNull().default(true),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: now(),
+  },
+  (t) => ({
+    userIdx: index("ym_watches_user_idx").on(t.userId),
+    uniquePerUser: uniqueIndex("ym_watches_user_sku_idx").on(t.userId, t.sku),
+  }),
+);
+
 // ── выгрузка в Google Таблицы ────────────────────────────────────────────────
 /**
  * Таблица пользователя. Курсоры хранят, до какой строки данные уже выгружены:
@@ -232,8 +307,10 @@ export const keywordPositions = pgTable(
  */
 export const userSheets = pgTable("user_sheets", {
   userId: integer("user_id")
-    .primaryKey()
+    .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
+  /** У каждой площадки своя таблица: смешивать их данные в одной незачем. */
+  marketplace: text("marketplace").notNull().default("wb").$type<Marketplace>(),
   spreadsheetId: text("spreadsheet_id").notNull(),
   spreadsheetUrl: text("spreadsheet_url").notNull(),
   cursorPricePoint: bigint("cursor_price_point", { mode: "number" }).notNull().default(0),
@@ -242,11 +319,17 @@ export const userSheets = pgTable("user_sheets", {
   lastExportAt: timestamp("last_export_at", { withTimezone: true }),
   lastError: text("last_error"),
   createdAt: now(),
-});
+}, (t) => ({
+  pk: primaryKey({ columns: [t.userId, t.marketplace] }),
+}));
 
 // ── подписки и уведомления ───────────────────────────────────────────────────
 export const watchKinds = ["product", "seller"] as const;
 export type WatchKind = (typeof watchKinds)[number];
+
+/** Площадка, с которой снимаются цены. */
+export const marketplaces = ["wb", "ym"] as const;
+export type Marketplace = (typeof marketplaces)[number];
 
 export const watches = pgTable(
   "watches",
@@ -305,6 +388,11 @@ export const alerts = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     watchId: integer("watch_id").references(() => watches.id, { onDelete: "cascade" }),
+    /** Подписка Маркета; заполнена вместо watch_id у событий Яндекса. */
+    ymWatchId: integer("ym_watch_id").references(() => ymWatches.id, { onDelete: "cascade" }),
+    /** Площадка события: лента в интерфейсе общая на обе. */
+    marketplace: text("marketplace").notNull().default("wb").$type<Marketplace>(),
+    /** Артикул Wildberries либо sku Маркета — оба числовые. */
     nm: bigint("nm", { mode: "number" }).notNull(),
     type: text("type").notNull().$type<AlertType>(),
     oldPrice: integer("old_price"),

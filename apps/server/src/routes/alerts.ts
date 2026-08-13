@@ -56,7 +56,12 @@ export async function alertRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/api/alerts/read", async (request, reply) => {
     const body = z
-      .object({ ids: z.array(z.number().int().positive()).max(500).optional() })
+      // Верхняя граница обязательна: 1e30 — целое и положительное с точки
+      // зрения JS, оно проходит проверку и доходит до Postgres, где столбец
+      // bigint отвечает ошибкой, а пользователь видит 500 вместо внятного 400.
+      .object({
+        ids: z.array(z.number().int().positive().max(Number.MAX_SAFE_INTEGER)).max(500).optional(),
+      })
       .safeParse(request.body ?? {});
     if (!body.success) return reply.code(400).send({ error: "Некорректные данные" });
 

@@ -4,11 +4,14 @@
 // контейнерам можно, но тогда лимитер придётся выносить в общий Redis.
 
 import type { WbClient } from "@watcher/wb-core";
+import type { YmClient } from "@watcher/ym-core";
 import { config } from "../config.js";
 import { purgeExpiredSessions } from "../auth.js";
 import { runPriceTick } from "./prices.js";
 import { runSellerTick } from "./sellers.js";
 import { runKeywordTick } from "./keywords.js";
+import { runYmTick } from "./ym.js";
+import { exportYm, ymUsersToExport } from "../services/ym-export.js";
 import { exportUser, usersToExport } from "../services/export.js";
 import type { GoogleApi } from "../services/google.js";
 
@@ -23,6 +26,7 @@ export class Scheduler {
   constructor(
     private readonly wb: WbClient,
     private readonly google: GoogleApi | null = null,
+    private readonly ym: YmClient | null = null,
   ) {}
 
   start(): void {
@@ -48,6 +52,17 @@ export class Scheduler {
     });
 
 
+    // Яндекс Маркет: цены снимаются по одному товару, пакетов у него нет,
+    // поэтому тик берёт горсть и идёт чаще, чем обход каталогов.
+    if (this.ym) {
+      this.every(60_000, "маркет", async () => {
+        const result = await runYmTick(this.ym as YmClient);
+        if (result.checked > 0 || result.events > 0) {
+          log(`маркет: проверено ${result.checked}, событий ${result.events}, пропало ${result.missing}`);
+        }
+      });
+    }
+
     // Позиции — по одному запросу за раз: search.wb.ru лимитирует жёстче всех,
     // и жадный обход стоил бы блокировки поиска целиком, включая интерфейс.
     this.every(3 * 60_000, "позиции", async () => {
@@ -61,9 +76,19 @@ export class Scheduler {
           try {
             const result = await exportUser(this.google as GoogleApi, userId);
             const total = result.products + result.sellers + result.keywords;
-            if (total > 0) log(`выгрузка пользователя ${userId}: строк ${total}`);
+            if (total > 0) log(`выгрузка Wildberries, пользователь ${userId}: строк ${total}`);
           } catch (error) {
-            log(`выгрузка пользователя ${userId}: ${(error as Error).message}`);
+            log(`выгрузка Wildberries, пользователь ${userId}: ${(error as Error).message}`);
+          }
+        }
+        // Таблица Маркета своя, и подключают её отдельно: пользователь мог
+        // подключить одну площадку и не подключить вторую.
+        for (const userId of await ymUsersToExport()) {
+          try {
+            const result = await exportYm(this.google as GoogleApi, userId);
+            if (result.products > 0) log(`выгрузка Маркета, пользователь ${userId}: строк ${result.products}`);
+          } catch (error) {
+            log(`выгрузка Маркета, пользователь ${userId}: ${(error as Error).message}`);
           }
         }
       });

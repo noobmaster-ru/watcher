@@ -64,33 +64,23 @@ export function SettingsPage() {
   );
 }
 
-interface SheetState {
-  available: boolean;
-  serviceAccountEmail: string | null;
+interface SheetSide {
   url: string | null;
   lastExportAt: string | null;
   lastError: string | null;
 }
 
+interface SheetState {
+  available: boolean;
+  serviceAccountEmail: string | null;
+  wb: SheetSide;
+  ym: SheetSide;
+}
+
 function GoogleSheet() {
   const queryClient = useQueryClient();
-  const [url, setUrl] = useState("");
   const [copied, setCopied] = useState(false);
-
   const sheet = useQuery({ queryKey: ["sheet"], queryFn: () => api.get<SheetState>("/api/sheet") });
-
-  const link = useMutation({
-    mutationFn: () => api.post<{ spreadsheetUrl: string; title: string }>("/api/sheet/link", { url }),
-    onSuccess: () => {
-      setUrl("");
-      void queryClient.invalidateQueries({ queryKey: ["sheet"] });
-    },
-  });
-
-  const exportNow = useMutation({
-    mutationFn: () => api.post<{ products: number; sellers: number; keywords: number }>("/api/sheet/export"),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["sheet"] }),
-  });
 
   if (sheet.data && !sheet.data.available) {
     return (
@@ -108,11 +98,11 @@ function GoogleSheet() {
   return (
     <section className="card space-y-3">
       <div>
-        <h2 className="font-semibold">Гугл-таблица</h2>
+        <h2 className="font-semibold">Гугл-таблицы</h2>
         <p className="muted">
-          Таблицу создаёте вы, в своём Google Диске: у сервисных аккаунтов Google нет собственного места на
-          Диске, поэтому создать её за вас приложение не может. Зато данные остаются на вашем Диске, а не на
-          чужом.
+          У каждой площадки своя таблица. Создаёте их вы, в своём Google Диске: у сервисных аккаунтов Google
+          нет собственного места на Диске, поэтому создать за вас приложение не может. Зато данные остаются на
+          вашем Диске, а не на чужом.
         </p>
       </div>
 
@@ -145,8 +135,53 @@ function GoogleSheet() {
         <li>3. Вставьте ссылку на таблицу сюда:</li>
       </ol>
 
+      <MarketplaceSheet marketplace="wb" label="Wildberries" side={sheet.data?.wb} />
+      <MarketplaceSheet marketplace="ym" label="Яндекс Маркет" side={sheet.data?.ym} />
+    </section>
+  );
+}
+
+/** Подключение и обновление таблицы одной площадки. */
+function MarketplaceSheet({
+  marketplace,
+  label,
+  side,
+}: {
+  marketplace: "wb" | "ym";
+  label: string;
+  side: SheetSide | undefined;
+}) {
+  const queryClient = useQueryClient();
+  const [url, setUrl] = useState("");
+
+  const link = useMutation({
+    mutationFn: () => api.post<{ spreadsheetUrl: string }>("/api/sheet/link", { url, marketplace }),
+    onSuccess: () => {
+      setUrl("");
+      void queryClient.invalidateQueries({ queryKey: ["sheet"] });
+    },
+  });
+
+  const exportNow = useMutation({
+    mutationFn: () => api.post<Record<string, number>>("/api/sheet/export", { marketplace }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["sheet"] }),
+  });
+
+  return (
+    <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="font-medium">{label}</h3>
+        {side?.url ? (
+          <a className="text-sm text-wb underline" href={side.url} target="_blank" rel="noreferrer">
+            открыть таблицу
+          </a>
+        ) : (
+          <span className="muted text-sm">не подключена</span>
+        )}
+      </div>
+
       <form
-        className="space-y-3"
+        className="flex gap-2"
         onSubmit={(event) => {
           event.preventDefault();
           link.mutate();
@@ -157,41 +192,27 @@ function GoogleSheet() {
           placeholder="https://docs.google.com/spreadsheets/d/…"
           value={url}
           onChange={(event) => setUrl(event.target.value)}
-          required
         />
-        {link.error != null && <ErrorBox error={link.error} />}
-        <button className="btn-primary" disabled={link.isPending || url.trim().length < 10}>
-          {link.isPending ? "Проверяю доступ…" : sheet.data?.url ? "Подключить другую таблицу" : "Подключить таблицу"}
+        <button className="btn-primary shrink-0" disabled={link.isPending || url.trim().length < 10}>
+          {link.isPending ? "…" : side?.url ? "Заменить" : "Подключить"}
         </button>
       </form>
 
-      {sheet.data?.url && (
-        <div className="space-y-2 border-t border-slate-200 pt-3 dark:border-slate-800">
-          <p className="text-sm">
-            Подключена:{" "}
-            <a className="text-wb underline" href={sheet.data.url} target="_blank" rel="noreferrer">
-              открыть таблицу
-            </a>
-            {sheet.data.lastExportAt && (
-              <span className="muted"> · обновлена {new Date(sheet.data.lastExportAt).toLocaleString("ru-RU")}</span>
-            )}
-          </p>
-          {sheet.data.lastError && <p className="text-sm text-amber-600">Последняя выгрузка: {sheet.data.lastError}</p>}
-          <div className="flex flex-wrap items-center gap-2">
-            <button className="btn-ghost" onClick={() => exportNow.mutate()} disabled={exportNow.isPending}>
-              {exportNow.isPending ? "Выгружаю…" : "Выгрузить сейчас"}
-            </button>
-            {exportNow.data && (
-              <span className="muted text-sm">
-                добавлено строк: товары {exportNow.data.products}, продавцы {exportNow.data.sellers}, ключевые слова{" "}
-                {exportNow.data.keywords}
-              </span>
-            )}
-          </div>
+      {link.error != null && <div className="mt-2"><ErrorBox error={link.error} /></div>}
+
+      {side?.url && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button className="btn-ghost" onClick={() => exportNow.mutate()} disabled={exportNow.isPending}>
+            {exportNow.isPending ? "Выгружаю…" : "Выгрузить сейчас"}
+          </button>
+          {side.lastExportAt && (
+            <span className="muted text-sm">обновлена {new Date(side.lastExportAt).toLocaleString("ru-RU")}</span>
+          )}
+          {side.lastError && <span className="text-sm text-amber-600">{side.lastError}</span>}
           {exportNow.error != null && <ErrorBox error={exportNow.error} />}
         </div>
       )}
-    </section>
+    </div>
   );
 }
 

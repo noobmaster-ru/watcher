@@ -4,8 +4,8 @@ import { config } from "./config.js";
 import { closeDb } from "./db/client.js";
 import { Scheduler } from "./scheduler/index.js";
 
-const { server, wb, google } = await buildApp();
-const scheduler = new Scheduler(wb, google);
+const { server, wb, ym, google } = await buildApp();
+const scheduler = new Scheduler(wb, google, ym);
 
 await server.listen({ port: config.port, host: config.host });
 console.error(`[watcher] слушает http://${config.host}:${config.port}`);
