@@ -126,9 +126,8 @@ export class FakeWb {
 
 /** Подставной Google: запоминает всё, что в него написали, вместо похода в сеть. */
 export class FakeGoogle {
+  readonly email = "watcher@example.iam.gserviceaccount.com";
   spreadsheets = new Map<string, Map<string, Array<Array<string | number | null>>>>();
-  shared: Array<{ spreadsheetId: string; email: string }> = [];
-  private counter = 0;
   /** Когда выставлено, любой вызов падает — так проверяется обработка отказа. */
   failWith: Error | null = null;
 
@@ -136,30 +135,29 @@ export class FakeGoogle {
     if (this.failWith) throw this.failWith;
   }
 
-  async createSpreadsheet(title: string, sheets: string[]) {
+  async describe(spreadsheetId: string) {
     this.guard();
-    this.counter += 1;
-    const spreadsheetId = `sheet-${this.counter}`;
+    const book = this.spreadsheets.get(spreadsheetId);
+    if (!book) throw new Error(`нет доступа к таблице ${spreadsheetId}`);
+    return {
+      title: this.titles.get(spreadsheetId) ?? "таблица",
+      sheets: [...book.keys()],
+      url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`,
+    };
+  }
+
+  async firstRow(spreadsheetId: string, sheet: string) {
+    this.guard();
+    const rows = this.spreadsheets.get(spreadsheetId)?.get(sheet) ?? [];
+    return (rows[0] ?? []).map(String);
+  }
+
+  /** Таблица, созданная «пользователем»: доступ у сервисного аккаунта уже есть. */
+  addExistingSpreadsheet(spreadsheetId: string, sheets: string[] = []): void {
     this.spreadsheets.set(spreadsheetId, new Map(sheets.map((name) => [name, []])));
-    return { spreadsheetId, spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`, title };
-  }
-
-  async shareWithEmail(spreadsheetId: string, email: string) {
-    this.guard();
-    this.shared.push({ spreadsheetId, email });
-  }
-
-  async unshareEmail(spreadsheetId: string, email: string) {
-    this.guard();
-    this.shared = this.shared.filter((s) => !(s.spreadsheetId === spreadsheetId && s.email === email));
   }
 
   titles = new Map<string, string>();
-
-  async renameSpreadsheet(spreadsheetId: string, title: string) {
-    this.guard();
-    this.titles.set(spreadsheetId, title);
-  }
 
   async ensureSheets(spreadsheetId: string, sheets: string[]) {
     this.guard();

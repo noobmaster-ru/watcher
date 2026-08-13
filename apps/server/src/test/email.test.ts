@@ -36,8 +36,14 @@ before(async () => {
   const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: OLD, password: PASSWORD } });
   cookie = String(login.headers["set-cookie"]).split(";")[0]!;
 
-  // таблица создаётся до смены почты — её доступ и должен переехать
-  await app.inject({ method: "POST", url: "/api/sheet/export", headers: { cookie } });
+  // таблица подключена до смены почты — её доступ и должен переехать
+  google.addExistingSpreadsheet("user-sheet-email", []);
+  await app.inject({
+    method: "POST",
+    url: "/api/sheet/link",
+    headers: { cookie },
+    payload: { url: "https://docs.google.com/spreadsheets/d/user-sheet-email/edit" },
+  });
 });
 
 after(async () => {
@@ -81,8 +87,8 @@ describe("смена почты", () => {
     assert.equal(response.statusCode, 409);
   });
 
-  it("меняет почту и переоткрывает доступ к таблице", async () => {
-    const [sheet] = await db.select().from(userSheets);
+  it("меняет почту, не трогая подключённую таблицу", async () => {
+    const [before] = await db.select().from(userSheets);
 
     const response = await app.inject({
       method: "POST",
@@ -91,11 +97,11 @@ describe("смена почты", () => {
       payload: { current: PASSWORD, email: NEW },
     });
     assert.equal(response.statusCode, 200, response.body);
-    assert.equal(response.json().sheetUpdated, true);
+    assert.equal(response.json().email, NEW);
 
-    const emails = google.shared.filter((s) => s.spreadsheetId === sheet!.spreadsheetId).map((s) => s.email);
-    assert.deepEqual(emails, [NEW], "старый адрес не должен сохранять доступ к данным аккаунта");
-    assert.equal(google.titles.get(sheet!.spreadsheetId), `watcher — ${NEW}`);
+    // таблицей владеет пользователь: снимать доступ у владельца нельзя и не нужно
+    const [after] = await db.select().from(userSheets);
+    assert.equal(after?.spreadsheetId, before?.spreadsheetId);
   });
 
   it("вход теперь по новой почте, по старой — нет", async () => {
@@ -111,10 +117,10 @@ describe("смена почты", () => {
     assert.equal(response.json().user.email, NEW);
   });
 
-  it("отказ Google не отменяет смену почты", async () => {
+  it("недоступность Google смену почты не блокирует", async () => {
     const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: NEW, password: PASSWORD } });
     const fresh = String(login.headers["set-cookie"]).split(";")[0]!;
-    google.failWith = new Error("Drive недоступен");
+    google.failWith = new Error("Google недоступен");
 
     const response = await app.inject({
       method: "POST",
@@ -123,12 +129,8 @@ describe("смена почты", () => {
       payload: { current: PASSWORD, email: "third@example.com" },
     });
     google.failWith = null;
+    assert.equal(response.statusCode, 200, "смена почты не должна зависеть от Google вовсе");
 
-    assert.equal(response.statusCode, 200);
-    assert.equal(response.json().sheetUpdated, false);
-    assert.match(response.json().sheetError, /Drive недоступен/);
-
-    // почта всё равно сменилась: права поправятся следующей выгрузкой
     const byThird = await app.inject({
       method: "POST",
       url: "/api/auth/login",

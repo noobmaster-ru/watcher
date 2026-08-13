@@ -1,8 +1,13 @@
 // Клиент Google Sheets на сервисном аккаунте.
 //
-// Библиотека googleapis сюда не тянется намеренно: нужно ровно четыре вызова —
-// получить токен, создать таблицу, выдать права, дописать строки. Всё это
-// обычный HTTPS плюс подпись JWT средствами node:crypto, а зависимость весом в
+// Приложение не создаёт таблицы и не раздаёт права: у сервисных аккаунтов
+// Google нет собственного места на Диске, и создание файла упирается в
+// «storage quota exceeded». Таблицу заводит сам пользователь и выдаёт
+// сервисному аккаунту доступ на редактирование — приложение только читает
+// структуру и дописывает строки.
+//
+// Библиотека googleapis сюда не тянется намеренно: нужно несколько вызовов
+// обычным HTTPS плюс подпись JWT средствами node:crypto, а зависимость весом в
 // десятки мегабайт пришлось бы тащить в образ и обновлять.
 
 import { createSign } from "node:crypto";
@@ -10,8 +15,8 @@ import { readFileSync } from "node:fs";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets";
-const DRIVE_API = "https://www.googleapis.com/drive/v3/files";
-const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file";
+// Нужны только таблицы: файлы приложение не создаёт и правами не управляет.
+const SCOPES = "https://www.googleapis.com/auth/spreadsheets";
 
 export interface ServiceAccount {
   client_email: string;
@@ -32,10 +37,12 @@ const base64url = (value: string | Buffer): string =>
 
 /** Интерфейс, который подменяется в тестах: сеть до Google там не нужна. */
 export interface GoogleApi {
-  createSpreadsheet(title: string, sheets: string[]): Promise<{ spreadsheetId: string; spreadsheetUrl: string }>;
-  shareWithEmail(spreadsheetId: string, email: string): Promise<void>;
-  unshareEmail(spreadsheetId: string, email: string): Promise<void>;
-  renameSpreadsheet(spreadsheetId: string, title: string): Promise<void>;
+  /** Почта сервисного аккаунта: её пользователь указывает, открывая доступ к своей таблице. */
+  readonly email: string;
+  /** Название и листы существующей таблицы. Заодно проверка, что доступ выдан. */
+  describe(spreadsheetId: string): Promise<{ title: string; sheets: string[]; url: string }>;
+  /** Первая строка листа: по ней видно, проставлены ли уже заголовки. */
+  firstRow(spreadsheetId: string, sheet: string): Promise<string[]>;
   ensureSheets(spreadsheetId: string, sheets: string[]): Promise<void>;
   appendRows(spreadsheetId: string, sheet: string, rows: Array<Array<string | number | null>>): Promise<number>;
   clearSheet(spreadsheetId: string, sheet: string): Promise<void>;
@@ -43,8 +50,11 @@ export interface GoogleApi {
 
 export class GoogleSheetsApi implements GoogleApi {
   private token: { value: string; expiresAt: number } | null = null;
+  readonly email: string;
 
-  constructor(private readonly account: ServiceAccount) {}
+  constructor(private readonly account: ServiceAccount) {
+    this.email = account.client_email;
+  }
 
   /** Токен живёт час; берём с запасом в минуту, чтобы не попасть на границу. */
   private async accessToken(): Promise<string> {
@@ -97,50 +107,27 @@ export class GoogleSheetsApi implements GoogleApi {
     return body as T;
   }
 
-  async createSpreadsheet(title: string, sheets: string[]) {
-    const created = await this.call<{ spreadsheetId: string; spreadsheetUrl: string }>(SHEETS_API, {
-      method: "POST",
-      body: JSON.stringify({
-        properties: { title, locale: "ru_RU", timeZone: "Europe/Moscow" },
-        sheets: sheets.map((name) => ({ properties: { title: name } })),
-      }),
+  async describe(spreadsheetId: string): Promise<{ title: string; sheets: string[]; url: string }> {
+    const meta = await this.call<{
+      properties?: { title?: string };
+      spreadsheetUrl?: string;
+      sheets?: Array<{ properties?: { title?: string } }>;
+    }>(`${SHEETS_API}/${spreadsheetId}?fields=properties.title,spreadsheetUrl,sheets.properties.title`, {
+      method: "GET",
     });
-    return { spreadsheetId: created.spreadsheetId, spreadsheetUrl: created.spreadsheetUrl };
+    return {
+      title: meta.properties?.title ?? "",
+      url: meta.spreadsheetUrl ?? `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`,
+      sheets: (meta.sheets ?? []).map((sheet) => sheet.properties?.title ?? "").filter(Boolean),
+    };
   }
 
-  /**
-   * Открывает пользователю доступ на редактирование. Сервисный аккаунт —
-   * владелец файла, поэтому без этого шага человек свою же таблицу не увидит.
-   */
-  async shareWithEmail(spreadsheetId: string, email: string): Promise<void> {
-    await this.call(`${DRIVE_API}/${spreadsheetId}/permissions?sendNotificationEmail=false`, {
-      method: "POST",
-      body: JSON.stringify({ role: "writer", type: "user", emailAddress: email }),
+  async firstRow(spreadsheetId: string, sheet: string): Promise<string[]> {
+    const range = encodeURIComponent(`${sheet}!A1:Z1`);
+    const data = await this.call<{ values?: string[][] }>(`${SHEETS_API}/${spreadsheetId}/values/${range}`, {
+      method: "GET",
     });
-  }
-
-  /**
-   * Закрывает доступ адресу. Нужно при смене почты: старый адрес не должен
-   * сохранять доступ к данным аккаунта.
-   */
-  async unshareEmail(spreadsheetId: string, email: string): Promise<void> {
-    const list = await this.call<{ permissions?: Array<{ id: string; emailAddress?: string }> }>(
-      `${DRIVE_API}/${spreadsheetId}/permissions?fields=permissions(id,emailAddress)`,
-      { method: "GET" },
-    );
-    const target = (list.permissions ?? []).find(
-      (permission) => permission.emailAddress?.toLowerCase() === email.toLowerCase(),
-    );
-    if (!target) return;
-    await this.call(`${DRIVE_API}/${spreadsheetId}/permissions/${target.id}`, { method: "DELETE" });
-  }
-
-  /** Переименование: в названии таблицы стоит почта владельца. */
-  async renameSpreadsheet(spreadsheetId: string, title: string): Promise<void> {
-    await this.call(`${DRIVE_API}/${spreadsheetId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ name: title }),
-    });
+    return data.values?.[0] ?? [];
   }
 
   /** Досоздаёт недостающие листы: таблицу мог править человек. */

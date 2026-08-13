@@ -1,8 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 
 interface SheetState {
   available: boolean;
+  serviceAccountEmail: string | null;
   url: string | null;
   lastExportAt: string | null;
   lastError: string | null;
@@ -11,26 +13,18 @@ interface SheetState {
 /**
  * Кнопка «Гугл-таблица» рядом с «Событиями».
  *
- * Если таблица уже создана — открывает её в новой вкладке. Если нет, сначала
- * просит сервер её создать: ссылки до создания попросту не существует, а
- * открывать пустую вкладку и потом в неё что-то дописывать нельзя — браузер
- * блокирует переход, сделанный не по клику.
+ * Подключённую таблицу открывает в новой вкладке. Если таблица ещё не
+ * подключена, ведёт в настройки: создать её должен сам пользователь — у
+ * сервисных аккаунтов Google нет места на Диске, и создать файл за него
+ * приложение не может.
  */
 export function SheetButton() {
-  const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const sheet = useQuery({
     queryKey: ["sheet"],
     queryFn: () => api.get<SheetState>("/api/sheet"),
     staleTime: 60_000,
-  });
-
-  const create = useMutation({
-    mutationFn: () => api.post<{ spreadsheetUrl: string }>("/api/sheet/export"),
-    onSuccess: (data) => {
-      void queryClient.invalidateQueries({ queryKey: ["sheet"] });
-      window.open(data.spreadsheetUrl, "_blank", "noopener,noreferrer");
-    },
   });
 
   if (sheet.data && !sheet.data.available) {
@@ -68,12 +62,11 @@ export function SheetButton() {
 
   return (
     <button
-      onClick={() => create.mutate()}
-      disabled={create.isPending}
-      className="shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm text-slate-600 transition hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800"
-      title={create.error ? (create.error as Error).message : "Создать таблицу и выгрузить историю"}
+      onClick={() => navigate("/settings")}
+      className="shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+      title="Таблица не подключена — откроются настройки с инструкцией"
     >
-      {create.isPending ? "Создаю таблицу…" : "Гугл-таблица"}
+      Гугл-таблица
     </button>
   );
 }

@@ -33,6 +33,7 @@ export function SettingsPage() {
         </p>
       </section>
 
+      <GoogleSheet />
       <ChangeEmail />
       <ChangePassword />
 
@@ -63,19 +64,150 @@ export function SettingsPage() {
   );
 }
 
+interface SheetState {
+  available: boolean;
+  serviceAccountEmail: string | null;
+  url: string | null;
+  lastExportAt: string | null;
+  lastError: string | null;
+}
+
+function GoogleSheet() {
+  const queryClient = useQueryClient();
+  const [url, setUrl] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  const sheet = useQuery({ queryKey: ["sheet"], queryFn: () => api.get<SheetState>("/api/sheet") });
+
+  const link = useMutation({
+    mutationFn: () => api.post<{ spreadsheetUrl: string; title: string }>("/api/sheet/link", { url }),
+    onSuccess: () => {
+      setUrl("");
+      void queryClient.invalidateQueries({ queryKey: ["sheet"] });
+    },
+  });
+
+  const exportNow = useMutation({
+    mutationFn: () => api.post<{ products: number; sellers: number; keywords: number }>("/api/sheet/export"),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["sheet"] }),
+  });
+
+  if (sheet.data && !sheet.data.available) {
+    return (
+      <section className="card space-y-2">
+        <h2 className="font-semibold">Гугл-таблица</h2>
+        <p className="muted">
+          Выгрузка не настроена: на сервере не задан ключ сервисного аккаунта Google.
+        </p>
+      </section>
+    );
+  }
+
+  const account = sheet.data?.serviceAccountEmail ?? "";
+
+  return (
+    <section className="card space-y-3">
+      <div>
+        <h2 className="font-semibold">Гугл-таблица</h2>
+        <p className="muted">
+          Таблицу создаёте вы, в своём Google Диске: у сервисных аккаунтов Google нет собственного места на
+          Диске, поэтому создать её за вас приложение не может. Зато данные остаются на вашем Диске, а не на
+          чужом.
+        </p>
+      </div>
+
+      <ol className="space-y-2 text-sm">
+        <li>
+          1. Создайте пустую таблицу:{" "}
+          <a className="text-wb underline" href="https://sheets.new" target="_blank" rel="noreferrer">
+            sheets.new
+          </a>
+        </li>
+        <li>
+          2. «Настройки доступа» → добавьте этот адрес с правом <b>Редактор</b>:
+          <div className="mt-1 flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded bg-slate-100 px-2 py-1 text-xs dark:bg-slate-800">
+              {account}
+            </code>
+            <button
+              type="button"
+              className="btn-ghost px-2 py-1 text-xs"
+              onClick={() => {
+                void navigator.clipboard.writeText(account);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              }}
+            >
+              {copied ? "скопировано" : "копировать"}
+            </button>
+          </div>
+        </li>
+        <li>3. Вставьте ссылку на таблицу сюда:</li>
+      </ol>
+
+      <form
+        className="space-y-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          link.mutate();
+        }}
+      >
+        <input
+          className="input"
+          placeholder="https://docs.google.com/spreadsheets/d/…"
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          required
+        />
+        {link.error != null && <ErrorBox error={link.error} />}
+        <button className="btn-primary" disabled={link.isPending || url.trim().length < 10}>
+          {link.isPending ? "Проверяю доступ…" : sheet.data?.url ? "Подключить другую таблицу" : "Подключить таблицу"}
+        </button>
+      </form>
+
+      {sheet.data?.url && (
+        <div className="space-y-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+          <p className="text-sm">
+            Подключена:{" "}
+            <a className="text-wb underline" href={sheet.data.url} target="_blank" rel="noreferrer">
+              открыть таблицу
+            </a>
+            {sheet.data.lastExportAt && (
+              <span className="muted"> · обновлена {new Date(sheet.data.lastExportAt).toLocaleString("ru-RU")}</span>
+            )}
+          </p>
+          {sheet.data.lastError && <p className="text-sm text-amber-600">Последняя выгрузка: {sheet.data.lastError}</p>}
+          <div className="flex flex-wrap items-center gap-2">
+            <button className="btn-ghost" onClick={() => exportNow.mutate()} disabled={exportNow.isPending}>
+              {exportNow.isPending ? "Выгружаю…" : "Выгрузить сейчас"}
+            </button>
+            {exportNow.data && (
+              <span className="muted text-sm">
+                добавлено строк: товары {exportNow.data.products}, продавцы {exportNow.data.sellers}, ключевые слова{" "}
+                {exportNow.data.keywords}
+              </span>
+            )}
+          </div>
+          {exportNow.error != null && <ErrorBox error={exportNow.error} />}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ChangeEmail() {
   const queryClient = useQueryClient();
   const me = useQuery({ queryKey: ["me"], queryFn: () => api.get<{ user: { email: string } }>("/api/me") });
   const [email, setEmail] = useState("");
   const [current, setCurrent] = useState("");
-  const [done, setDone] = useState<{ email: string; sheetError: string | null } | null>(null);
+  const [done, setDone] = useState<{ email: string } | null>(null);
 
   const change = useMutation({
-    mutationFn: () => api.post<{ email: string; sheetUpdated: boolean; sheetError: string | null }>("/api/auth/email", { current, email }),
+    mutationFn: () => api.post<{ email: string }>("/api/auth/email", { current, email }),
     onSuccess: (data) => {
       setCurrent("");
       setEmail("");
-      setDone({ email: data.email, sheetError: data.sheetError });
+      setDone({ email: data.email });
       void queryClient.invalidateQueries({ queryKey: ["me"] });
       void queryClient.invalidateQueries({ queryKey: ["sheet"] });
     },
@@ -86,9 +218,8 @@ function ChangeEmail() {
       <div>
         <h2 className="font-semibold">Почта аккаунта</h2>
         <p className="muted">
-          Текущая: <span className="font-medium">{me.data?.user.email ?? "…"}</span>. Почта — это и логин, и адрес,
-          на который открыт доступ к Гугл-таблице: при смене доступ переоткрывается на новый, а для старого
-          закрывается.
+          Текущая: <span className="font-medium">{me.data?.user.email ?? "…"}</span>. Это и логин: после смены
+          входить нужно по новому адресу. Подключённой Гугл-таблицы смена не касается — ею владеете вы.
         </p>
       </div>
 
@@ -130,17 +261,7 @@ function ChangeEmail() {
         </div>
 
         {change.error != null && <ErrorBox error={change.error} />}
-        {done && (
-          <div className="space-y-1 text-sm">
-            <p className="text-emerald-600">Почта изменена на {done.email}. Входите теперь по ней.</p>
-            {done.sheetError && (
-              <p className="text-amber-600">
-                Доступ к Гугл-таблице переоткрыть не удалось: {done.sheetError}. Нажмите «Гугл-таблица» —
-                выгрузка попробует ещё раз.
-              </p>
-            )}
-          </div>
-        )}
+        {done && <p className="text-sm text-emerald-600">Почта изменена на {done.email}. Входите теперь по ней.</p>}
 
         <button className="btn-primary" disabled={change.isPending || !email || !current}>
           {change.isPending ? "…" : "Сменить почту"}

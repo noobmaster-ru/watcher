@@ -5,7 +5,6 @@ import { db } from "../db/client.js";
 import { users } from "../db/schema.js";
 import { config } from "../config.js";
 import { AccountError, changeEmail } from "../services/account.js";
-import type { GoogleApi } from "../services/google.js";
 import {
   SESSION_COOKIE,
   destroyOtherSessions,
@@ -23,7 +22,7 @@ const credentials = z.object({
   password: z.string().min(8, "Пароль от 8 символов").max(200),
 });
 
-export async function authRoutes(app: FastifyInstance, google: GoogleApi | null = null): Promise<void> {
+export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post("/api/auth/register", async (request, reply) => {
     if (!config.allowRegistration) {
       return reply.code(403).send({ error: "Регистрация закрыта" });
@@ -113,7 +112,7 @@ export async function authRoutes(app: FastifyInstance, google: GoogleApi | null 
     }
 
     try {
-      const result = await changeEmail(request.user!.id, parsed.data.current, parsed.data.email, google);
+      const result = await changeEmail(request.user!.id, parsed.data.current, parsed.data.email);
       return reply.send(result);
     } catch (error) {
       if (error instanceof AccountError) return reply.code(error.status).send({ error: error.message });

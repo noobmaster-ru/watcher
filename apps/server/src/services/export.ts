@@ -7,7 +7,7 @@
 
 import { eq, sql } from "drizzle-orm";
 import { db, rowsOf } from "../db/client.js";
-import { userSheets, users } from "../db/schema.js";
+import { userSheets } from "../db/schema.js";
 import type { GoogleApi } from "./google.js";
 
 export const SHEET_PRODUCTS = "Товары";
@@ -42,39 +42,80 @@ export interface ExportResult {
   keywords: number;
 }
 
+/** Идентификатор таблицы из ссылки вида docs.google.com/spreadsheets/d/<id>/edit. */
+export function parseSpreadsheetId(input: string): string {
+  const raw = input.trim();
+  const match = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (match?.[1]) return match[1];
+  if (/^[a-zA-Z0-9-_]{20,}$/.test(raw)) return raw;
+  throw new Error("Не похоже на ссылку или идентификатор Гугл-таблицы");
+}
+
+export class SheetNotLinkedError extends Error {
+  constructor(serviceAccountEmail: string) {
+    super(
+      `Таблица не подключена. Создайте её в своём Google Диске, откройте доступ на редактирование ` +
+        `для ${serviceAccountEmail} и вставьте ссылку в настройках.`,
+    );
+    this.name = "SheetNotLinkedError";
+  }
+}
+
 /**
- * Создаёт таблицу пользователя, если её ещё нет, и открывает ему доступ.
- * Владельцем файла остаётся сервисный аккаунт — иначе выдавать права было бы
- * некому.
+ * Подключает таблицу, созданную пользователем.
+ *
+ * Приложение не создаёт таблицы само, и это не упрощение: у сервисных аккаунтов
+ * Google больше нет собственного места на Диске, и любая попытка создать файл
+ * упирается в «storage quota exceeded». Поэтому владельцем таблицы остаётся
+ * человек, а сервисному аккаунту он выдаёт доступ на редактирование — заодно
+ * данные остаются на его Диске, а не на чужом.
  */
+export async function linkSpreadsheet(
+  api: GoogleApi,
+  userId: number,
+  input: string,
+): Promise<{ spreadsheetId: string; spreadsheetUrl: string; title: string }> {
+  const spreadsheetId = parseSpreadsheetId(input);
+
+  // Читаем таблицу: это одновременно и проверка, что доступ действительно выдан.
+  const meta = await api.describe(spreadsheetId);
+  await api.ensureSheets(spreadsheetId, SHEETS);
+
+  // Заголовки проставляем только в пустые листы, чтобы не портить чужую разметку.
+  for (const sheet of SHEETS) {
+    const header = await api.firstRow(spreadsheetId, sheet);
+    if (header.length === 0) await api.appendRows(spreadsheetId, sheet, [HEADERS[sheet] as string[]]);
+  }
+
+  await db
+    .insert(userSheets)
+    .values({ userId, spreadsheetId, spreadsheetUrl: meta.url })
+    .onConflictDoUpdate({
+      target: userSheets.userId,
+      set: {
+        spreadsheetId,
+        spreadsheetUrl: meta.url,
+        // курсоры сбрасываем: таблица другая, и вся история должна уехать заново
+        cursorPricePoint: 0,
+        cursorKeywordPosition: 0,
+        cursorSellerSnapshot: 0,
+        lastError: null,
+      },
+    });
+
+  return { spreadsheetId, spreadsheetUrl: meta.url, title: meta.title };
+}
+
+/** Проверяет, что таблица подключена, и что листы на месте. */
 export async function ensureSpreadsheet(
   api: GoogleApi,
   userId: number,
-): Promise<{ spreadsheetId: string; spreadsheetUrl: string; created: boolean }> {
+): Promise<{ spreadsheetId: string; spreadsheetUrl: string }> {
   const [existing] = await db.select().from(userSheets).where(eq(userSheets.userId, userId)).limit(1);
-  if (existing) {
-    await api.ensureSheets(existing.spreadsheetId, SHEETS);
-    return { spreadsheetId: existing.spreadsheetId, spreadsheetUrl: existing.spreadsheetUrl, created: false };
-  }
+  if (!existing) throw new SheetNotLinkedError(api.email);
 
-  const [user] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
-  if (!user) throw new Error(`Пользователь ${userId} не найден`);
-
-  const created = await api.createSpreadsheet(`watcher — ${user.email}`, SHEETS);
-  await api.shareWithEmail(created.spreadsheetId, user.email);
-
-  // шапки пишем один раз, при создании
-  for (const sheet of SHEETS) {
-    await api.appendRows(created.spreadsheetId, sheet, [HEADERS[sheet] as string[]]);
-  }
-
-  await db.insert(userSheets).values({
-    userId,
-    spreadsheetId: created.spreadsheetId,
-    spreadsheetUrl: created.spreadsheetUrl,
-  });
-
-  return { ...created, created: true };
+  await api.ensureSheets(existing.spreadsheetId, SHEETS);
+  return { spreadsheetId: existing.spreadsheetId, spreadsheetUrl: existing.spreadsheetUrl };
 }
 
 /** Дописывает всё, что появилось с прошлого прогона. */

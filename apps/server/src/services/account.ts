@@ -1,15 +1,14 @@
 // Смена почты аккаунта.
 //
-// Почта — это и логин, и адрес, на который открыт доступ к Google Таблице.
-// Поэтому смена затрагивает не только строку в базе: таблицу нужно переоткрыть
-// на новый адрес и закрыть для старого, иначе прежняя почта сохранит доступ к
-// данным аккаунта.
+// Гугл-таблицу смена почты не затрагивает: владеет ею сам пользователь, а
+// пишет в неё сервисный аккаунт, который не меняется. Трогать права владельца
+// файла было бы не только лишним, но и вредным — снять доступ у владельца
+// нельзя, и попытка закончилась бы невнятной ошибкой.
 
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { userSheets, users } from "../db/schema.js";
+import { users } from "../db/schema.js";
 import { verifyPassword } from "../auth.js";
-import type { GoogleApi } from "./google.js";
 
 export class AccountError extends Error {
   readonly status: number;
@@ -22,16 +21,12 @@ export class AccountError extends Error {
 
 export interface EmailChangeResult {
   email: string;
-  /** Удалось ли переоткрыть доступ к таблице. */
-  sheetUpdated: boolean;
-  sheetError: string | null;
 }
 
 export async function changeEmail(
   userId: number,
   currentPassword: string,
   nextEmail: string,
-  google: GoogleApi | null,
 ): Promise<EmailChangeResult> {
   const email = nextEmail.trim().toLowerCase();
 
@@ -53,21 +48,5 @@ export async function changeEmail(
   if (taken) throw new AccountError(409, "Такая почта уже занята");
 
   await db.update(users).set({ email }).where(eq(users.id, userId));
-
-  // Доступ к таблице переносим отдельно и не роняем смену почты, если Google
-  // отказал: почта уже сменилась, а права можно поправить следующей выгрузкой.
-  const [sheet] = await db.select().from(userSheets).where(eq(userSheets.userId, userId)).limit(1);
-  if (!sheet || !google) return { email, sheetUpdated: false, sheetError: null };
-
-  try {
-    await google.shareWithEmail(sheet.spreadsheetId, email);
-    await google.unshareEmail(sheet.spreadsheetId, user.email);
-    await google.renameSpreadsheet(sheet.spreadsheetId, `watcher — ${email}`);
-    await db.update(userSheets).set({ lastError: null }).where(eq(userSheets.userId, userId));
-    return { email, sheetUpdated: true, sheetError: null };
-  } catch (error) {
-    const message = (error as Error).message;
-    await db.update(userSheets).set({ lastError: message }).where(eq(userSheets.userId, userId));
-    return { email, sheetUpdated: false, sheetError: message };
-  }
+  return { email };
 }

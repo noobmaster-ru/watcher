@@ -161,17 +161,50 @@ describe("позиции по ключевым словам", () => {
 });
 
 describe("выгрузка в Google Таблицу", () => {
-  it("создаёт таблицу с тремя листами и открывает доступ владельцу", async () => {
+  it("без подключённой таблицы выгрузка честно говорит, что делать", async () => {
+    const response = await app.inject({ method: "POST", url: "/api/sheet/export", headers: { cookie } });
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.json().needsLink, true);
+    assert.match(response.json().error, /watcher@example\.iam\.gserviceaccount\.com/);
+  });
+
+  it("подключает таблицу пользователя и досоздаёт три листа", async () => {
+    // таблицу создал человек и выдал доступ сервисному аккаунту
+    google.addExistingSpreadsheet("user-sheet-1", ["Лист1"]);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/sheet/link",
+      headers: { cookie },
+      payload: { url: "https://docs.google.com/spreadsheets/d/user-sheet-1/edit#gid=0" },
+    });
+    assert.equal(response.statusCode, 200, response.body);
+
+    const book = google.spreadsheets.get("user-sheet-1")!;
+    for (const sheet of [SHEET_PRODUCTS, SHEET_SELLERS, SHEET_KEYWORDS]) {
+      assert.ok(book.has(sheet), `лист «${sheet}» должен появиться`);
+      assert.ok((book.get(sheet) ?? []).length > 0, "в пустой лист должны лечь заголовки");
+    }
+    assert.ok(book.has("Лист1"), "чужие листы трогать нельзя");
+  });
+
+  it("отказ доступа объясняет, кому его выдать", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/sheet/link",
+      headers: { cookie },
+      payload: { url: "https://docs.google.com/spreadsheets/d/no-such-sheet/edit" },
+    });
+    assert.equal(response.statusCode, 400);
+    assert.match(response.json().error, /нет доступа|watcher@example/);
+  });
+
+  it("выгружает историю в подключённую таблицу", async () => {
     const response = await app.inject({ method: "POST", url: "/api/sheet/export", headers: { cookie } });
     assert.equal(response.statusCode, 200, response.body);
 
-    const url = response.json().spreadsheetUrl as string;
-    assert.match(url, /^https:\/\/docs\.google\.com\/spreadsheets\//);
-
     const [state] = await db.select().from(userSheets);
-    const book = google.spreadsheets.get(state!.spreadsheetId)!;
-    assert.deepEqual([...book.keys()].sort(), [SHEET_KEYWORDS, SHEET_PRODUCTS, SHEET_SELLERS].sort());
-    assert.deepEqual(google.shared, [{ spreadsheetId: state!.spreadsheetId, email: "kw@example.com" }]);
+    assert.equal(state?.spreadsheetId, "user-sheet-1");
   });
 
   it("пишет историю цен и позиций, каждую строку с датой", async () => {
