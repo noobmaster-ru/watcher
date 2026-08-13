@@ -6,6 +6,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY packages/wb-core/package.json packages/wb-core/
+COPY packages/ym-core/package.json packages/ym-core/
 COPY apps/server/package.json apps/server/
 COPY apps/mcp/package.json apps/mcp/
 COPY apps/web/package.json apps/web/

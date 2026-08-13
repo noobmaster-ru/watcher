@@ -9,6 +9,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY packages/wb-core/package.json packages/wb-core/
+COPY packages/ym-core/package.json packages/ym-core/
 COPY apps/server/package.json apps/server/
 COPY apps/mcp/package.json apps/mcp/
 COPY apps/web/package.json apps/web/
@@ -16,9 +17,11 @@ RUN npm ci
 
 COPY tsconfig.base.json ./
 COPY packages/wb-core packages/wb-core
+COPY packages/ym-core packages/ym-core
 COPY apps/server apps/server
 COPY apps/mcp apps/mcp
 RUN npm run build -w @watcher/wb-core \
+ && npm run build -w @watcher/ym-core \
  && npm run build -w @watcher/server \
  && npm run build -w @watcher/mcp
 
@@ -32,12 +35,14 @@ ENV NODE_ENV=production
 
 COPY package.json package-lock.json ./
 COPY packages/wb-core/package.json packages/wb-core/
+COPY packages/ym-core/package.json packages/ym-core/
 COPY apps/server/package.json apps/server/
 COPY apps/mcp/package.json apps/mcp/
 COPY apps/web/package.json apps/web/
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=builder /app/packages/wb-core/dist packages/wb-core/dist
+COPY --from=builder /app/packages/ym-core/dist packages/ym-core/dist
 COPY --from=builder /app/apps/server/dist apps/server/dist
 COPY --from=builder /app/apps/mcp/dist apps/mcp/dist
 # SQL-миграции лежат рядом с кодом: migrate.js ищет их по ../../drizzle
