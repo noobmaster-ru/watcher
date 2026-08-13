@@ -36,6 +36,16 @@ export async function ymRoutes(app: FastifyInstance, client: YmClient): Promise<
         input: parsed.data.product,
         intervalMin: parsed.data.intervalMin,
       });
+
+      if (result.kind === "candidates") {
+        // Ссылку в номер товара надёжно не развернуть, поэтому выбирает человек.
+        return reply.code(409).send({
+          needsChoice: true,
+          query: result.query,
+          candidates: result.items,
+          error: `Из ссылки товар определяется неточно. Выберите нужный из найденного по запросу «${result.query}»`,
+        });
+      }
       return reply.send({ watchId: result.watchId, sku: result.sku, product: result.product });
     } catch (error) {
       if (error instanceof YmUnavailableError) {

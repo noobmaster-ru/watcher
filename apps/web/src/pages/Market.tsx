@@ -37,11 +37,21 @@ export function MarketPage() {
     queryFn: () => api.get<{ watches: YmWatch[] }>("/api/ym/watches"),
   });
 
+  const [candidates, setCandidates] = useState<{ query: string; items: YmProduct[] } | null>(null);
+
   const add = useMutation({
     mutationFn: (product: string) => api.post("/api/ym/watches", { product }),
     onSuccess: () => {
       setInput("");
+      setCandidates(null);
       void queryClient.invalidateQueries({ queryKey: ["ym-watches"] });
+    },
+    onError: (error) => {
+      // По ссылке товар определяется неточно, поэтому сервер возвращает
+      // кандидатов, а выбирает человек
+      const payload = (error as { payload?: { candidates?: YmProduct[]; query?: string } }).payload;
+      if (payload?.candidates?.length) setCandidates({ query: payload.query ?? "", items: payload.candidates });
+      else setCandidates(null);
     },
   });
 
@@ -78,14 +88,31 @@ export function MarketPage() {
             required
           />
           <p className="muted mt-1">
-            Маркет ищет цену по номеру товара, а не по адресу страницы: число в ссылке — это другой
-            идентификатор, поэтому ссылку приложение сначала разворачивает в номер.
+            Надёжнее всего номер товара. Ссылку тоже можно вставить, но по ней товар определяется неточно —
+            число в адресе Маркета не совпадает с номером товара, — поэтому приложение покажет найденное и
+            попросит выбрать. Не знаете номер — воспользуйтесь поиском ниже.
           </p>
         </div>
         {add.error != null && <ErrorBox error={add.error} />}
         <button className="btn-primary" disabled={add.isPending || input.trim().length < 4}>
           {add.isPending ? "Смотрю на Маркете…" : "Отслеживать цену"}
         </button>
+
+        {candidates && (
+          <div className="space-y-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+            <p className="muted">Найдено по запросу «{candidates.query}» — выберите нужный товар:</p>
+            {candidates.items.map((item) => (
+              <div key={item.sku} className="flex items-center gap-3">
+                {item.image && <img src={item.image} alt="" className="h-10 w-10 rounded object-cover" />}
+                <span className="min-w-0 flex-1 truncate text-sm">{item.name}</span>
+                <span className="font-semibold">{money(item.price)}</span>
+                <button type="button" className="btn-ghost" onClick={() => add.mutate(item.sku)}>
+                  Это он
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </form>
 
       <form

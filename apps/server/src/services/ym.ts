@@ -157,8 +157,16 @@ export async function fanOutYmEvents(sku: string, events: PriceEvent[]): Promise
 export async function watchYmProduct(
   client: YmClient,
   input: { userId: number; input: string; intervalMin?: number },
-): Promise<{ watchId: number; sku: string; product: YmProduct }> {
-  const sku = await client.resolveSku(input.input);
+): Promise<
+  | { kind: "watched"; watchId: number; sku: string; product: YmProduct }
+  | { kind: "candidates"; query: string; items: YmProduct[] }
+> {
+  const resolved = await client.resolve(input.input);
+  if (resolved.kind === "candidates") {
+    return { kind: "candidates", query: resolved.query, items: resolved.items };
+  }
+
+  const sku = resolved.sku;
   const product = await client.bySku(sku);
   if (!product) throw new Error(`Товар ${sku} на Яндекс Маркете не найден`);
 
@@ -176,7 +184,7 @@ export async function watchYmProduct(
     .returning({ id: ymWatches.id });
 
   await refreshYmTracking([sku]);
-  return { watchId: row?.id ?? 0, sku, product };
+  return { kind: "watched", watchId: row?.id ?? 0, sku, product };
 }
 
 /** Пересчитывает, надо ли опрашивать товары и как часто. */

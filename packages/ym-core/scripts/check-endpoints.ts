@@ -34,10 +34,14 @@ await step("цена по номеру товара", async () => {
   return `${product.name?.slice(0, 38)} — ${product.price} ₽, в наличии: ${product.inStock}`;
 });
 
-await step("ссылка на карточку → номер товара", async () => {
-  const sku = await client.resolveSku(CARD);
-  if (sku !== SKU) throw new Error(`развернулось в ${sku}, ожидалось ${SKU}`);
-  return `${sku}`;
+await step("ссылка на карточку → кандидаты", async () => {
+  // развернуть ссылку в номер напрямую нельзя: карточка закрыта капчей, а число
+  // в адресе — не sku. Поэтому проверяем, что по названию из адреса что-то находится
+  const result = await client.resolve(CARD);
+  if (result.kind !== "candidates") throw new Error("ожидался список кандидатов");
+  if (result.items.length === 0) throw new Error(`по запросу «${result.query}» ничего не нашлось`);
+  const exact = result.items.find((item) => item.sku === SKU);
+  return `запрос «${result.query}», ${result.items.length} кандидатов${exact ? ", нужный среди них" : ""}`;
 });
 
 const pad = Math.max(...results.map((r) => r.name.length));

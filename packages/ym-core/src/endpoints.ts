@@ -5,7 +5,7 @@
 // отдаёт, а страница поиска отдаёт микроразметку с ценой. Поэтому и добавление
 // товара, и каждая последующая проверка идут через поиск.
 
-import { parseInput, parseSearch, parseSkuFromCard } from "./parse.js";
+import { parseInput, parseSearch, slugQuery } from "./parse.js";
 import { YmTransport } from "./transport.js";
 import type { YmConfig, YmProduct } from "./types.js";
 
@@ -60,24 +60,23 @@ export class YmClient {
   }
 
   /**
-   * Превращает то, что вставил пользователь, в sku. Ссылку на карточку
-   * приходится разворачивать: число в её адресе — это не sku, поиск по нему
-   * ничего не находит.
+   * Разбирает то, что вставил пользователь.
+   *
+   * Номер товара берётся как есть. Ссылку развернуть в номер надёжно нельзя:
+   * число в адресе — не sku, а карточка закрыта капчей. Поэтому по названию из
+   * адреса выполняется поиск, и наружу отдаётся список кандидатов — выбирает
+   * пользователь. Угадывать нельзя: проверка на живых ссылках дала одно
+   * попадание из двух.
    */
-  async resolveSku(input: string): Promise<string> {
+  async resolve(input: string): Promise<{ kind: "sku"; sku: string } | { kind: "candidates"; query: string; items: YmProduct[] }> {
     const parsed = parseInput(input);
-    if (parsed.kind === "sku") return parsed.sku;
+    if (parsed.kind === "sku") return { kind: "sku", sku: parsed.sku };
 
-    const html = await this.transport.getHtml(parsed.url);
-    if (!html) throw new Error("Страница товара не открылась");
-
-    const sku = parseSkuFromCard(html);
-    if (!sku) {
-      throw new Error(
-        "На странице не нашёлся номер товара. Скопируйте его из адресной строки или найдите товар поиском",
-      );
+    const query = slugQuery(parsed.url);
+    if (!query) {
+      throw new Error("Из ссылки не вышло понять товар. Вставьте его номер или найдите поиском");
     }
-    return sku;
+    return { kind: "candidates", query, items: await this.search(query, 8) };
   }
 
   status() {

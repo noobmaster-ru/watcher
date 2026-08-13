@@ -64,10 +64,13 @@ class FakeYm {
     return this.prices.get(sku) ?? null;
   }
 
-  async resolveSku(input: string): Promise<string> {
-    const match = input.match(/(\d{6,16})/);
-    if (!match) throw new Error("Нужен номер товара Яндекс Маркета или ссылка на его карточку");
-    return match[1]!;
+  async resolve(input: string) {
+    if (/^\d{6,16}$/.test(input.trim())) return { kind: "sku" as const, sku: input.trim() };
+    if (/market\.yandex\./i.test(input)) {
+      // ссылку в номер не развернуть — отдаём кандидатов, как настоящий клиент
+      return { kind: "candidates" as const, query: "товар из ссылки", items: [...this.prices.values()] };
+    }
+    throw new Error("Нужен номер товара Яндекс Маркета или ссылка на его карточку");
   }
 
   status() {
@@ -199,15 +202,21 @@ describe("отслеживание товара Маркета", () => {
     assert.equal(points.length, 1);
   });
 
-  it("добавляется по ссылке на карточку", async () => {
+  it("ссылка не добавляется молча, а предлагает выбрать товар", async () => {
+    // Число в адресе Маркета — не номер товара, а сама карточка закрыта капчей.
+    // Угадывать нельзя: на живых ссылках такой поиск дал одно попадание из двух.
     ym.set(product({ sku: "900000000123", name: "Другой товар", price: 500 }));
     const response = await app.inject({
       method: "POST",
       url: "/api/ym/watches",
       headers: { cookie },
-      payload: { product: "https://market.yandex.ru/card/tovar/900000000123" },
+      payload: { product: "https://market.yandex.ru/card/nabor-shampurov/900000000123" },
     });
-    assert.equal(response.statusCode, 200, response.body);
+
+    assert.equal(response.statusCode, 409);
+    const body = response.json();
+    assert.equal(body.needsChoice, true);
+    assert.ok(body.candidates.length > 0, "должны приехать кандидаты на выбор");
   });
 
   it("тик планировщика замечает снижение цены", async () => {

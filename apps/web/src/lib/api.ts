@@ -5,10 +5,13 @@
 export class ApiError extends Error {
   readonly status: number;
   readonly degraded: boolean;
-  constructor(status: number, message: string, degraded = false) {
+  /** Тело ответа целиком: в нём приезжают, например, кандидаты для выбора. */
+  readonly payload: Record<string, unknown>;
+  constructor(status: number, message: string, degraded = false, payload: Record<string, unknown> = {}) {
     super(message);
     this.status = status;
     this.degraded = degraded;
+    this.payload = payload;
   }
 }
 
@@ -29,6 +32,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       response.status,
       (body.error as string) ?? `Ошибка ${response.status}`,
       Boolean(body.degraded),
+      body,
     );
   }
   return body as T;
