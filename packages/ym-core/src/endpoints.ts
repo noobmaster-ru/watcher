@@ -28,14 +28,25 @@ export class YmClient {
   /**
    * Цена и данные конкретного товара.
    *
-   * Маркет по запросу «sku» возвращает не только сам товар, но и похожие,
-   * поэтому из выдачи выбирается строка с совпадающим sku, а не первая.
+   * Тонкость, которую видно только на живых данных: по одному sku Маркет может
+   * вернуть несколько строк с разной ценой — это предложения разных продавцов
+   * на один товар. Брать первую нельзя: порядок выдачи меняется, и цена скакала
+   * бы туда-сюда без всякого изменения на самом деле. Берём минимальную —
+   * именно её видит покупатель как цену товара.
    */
   async bySku(sku: string): Promise<YmProduct | null> {
     const html = await this.transport.getHtml(`${SEARCH}${encodeURIComponent(sku)}`);
     if (!html) return null;
-    const products = parseSearch(html);
-    return products.find((product) => product.sku === sku) ?? null;
+
+    const matching = parseSearch(html).filter((product) => product.sku === sku);
+    if (matching.length === 0) return null;
+
+    const priced = matching.filter((product) => product.price !== null);
+    if (priced.length === 0) return matching[0] as YmProduct;
+
+    return priced.reduce((best, current) =>
+      (current.price as number) < (best.price as number) ? current : best,
+    );
   }
 
   /** Цены сразу для нескольких товаров: у Маркета батчей нет, идём по одному. */

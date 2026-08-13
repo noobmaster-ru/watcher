@@ -12,7 +12,11 @@ export interface YmProduct {
 }
 
 export interface YmConfig {
-  /** HTTP-прокси, если приложение живёт вне России. */
+  /**
+   * Прокси здесь не поддержан: запросы идут встроенным fetch, а он умеет прокси
+   * только через ProxyAgent из undici — отдельную зависимость. Поле оставлено
+   * ради единообразия с клиентом Wildberries и сознательно игнорируется.
+   */
   proxy?: string | undefined;
   log?: ((...args: unknown[]) => void) | undefined;
 }

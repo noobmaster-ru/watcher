@@ -1,14 +1,20 @@
 // HTTP-клиент Яндекс Маркета.
 //
-// Здесь намеренно нет той машинерии, что в клиенте Wildberries: у Маркета не
-// наблюдается ни жёстких лимитов, ни фильтрации по TLS-отпечатку — пять
-// запросов подряд с московского сервера прошли без единого отказа. Поэтому
-// достаточно скромной паузы между обращениями и обычных ретраев.
+// Запросы идут встроенным fetch, а не системным curl — и это ровно наоборот по
+// сравнению с клиентом Wildberries. Причина в фильтрации по TLS-отпечатку, и
+// площадки фильтруют в разные стороны: card.wb.ru отбивает fetch и пропускает
+// curl, а Маркет отбивает curl из образа (Debian bookworm, версия 7.88) капчей
+// «Вы не робот?» и спокойно пропускает fetch. Проверено на боевом сервере:
+// один и тот же запрос даёт 13 КБ капчи через curl и 1.5 МБ страницы через
+// fetch. Заменить fetch на curl здесь — сломать сбор цен целиком.
 //
-// Запросы всё равно идут через системный curl, а не fetch: так работает вся
-// сетевая часть приложения, и прокси с таймаутами настраиваются единообразно.
+// Жёстких лимитов у Маркета не замечено: пять запросов подряд прошли без
+// единого отказа, поэтому достаточно скромной паузы и обычных ретраев.
+//
+// Прокси тут не поддержан намеренно: fetch умеет его только через ProxyAgent из
+// undici, отдельной зависимости. Приложение живёт на российском сервере, где
+// прокси не нужен; если понадобится — придётся её добавить.
 
-import { execFile } from "node:child_process";
 import { YmHttpError, YmUnavailableError, type YmConfig } from "./types.js";
 
 /** Заголовки настоящего браузера: без них Маркет отдаёт заглушку антибота. */
@@ -27,7 +33,6 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 
 export class YmTransport {
   private readonly log: (...args: unknown[]) => void;
-  private readonly proxy: string | undefined;
   private gate: Promise<void> = Promise.resolve();
   private failures = 0;
   private blockedUntil = 0;
@@ -35,7 +40,6 @@ export class YmTransport {
 
   constructor(config: YmConfig = {}) {
     this.log = config.log ?? ((...args: unknown[]) => console.error("[ym]", ...args));
-    this.proxy = config.proxy || undefined;
   }
 
   blockedForMs(): number {
@@ -58,40 +62,28 @@ export class YmTransport {
     return next;
   }
 
-  private curl(url: string, timeoutSec: number): Promise<{ status: number; body: string }> {
-    return new Promise((resolve, reject) => {
-      const args = [
-        "-sSL", // Маркет любит перекидывать между зеркалами
-        "--compressed",
-        "--max-redirs",
-        "5",
-        "-m",
-        String(timeoutSec),
-        "-H",
-        `User-Agent: ${UA}`,
-        "-H",
-        "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "-H",
-        "Accept-Language: ru-RU,ru;q=0.9",
-        "-H",
-        "Sec-Fetch-Dest: document",
-        "-H",
-        "Sec-Fetch-Mode: navigate",
-        "-H",
-        "Sec-Fetch-Site: none",
-        "-w",
-        "\n%{http_code}",
-      ];
-      if (this.proxy) args.push("--proxy", this.proxy);
-      args.push(url);
-
-      execFile("curl", args, { maxBuffer: 64 * 1024 * 1024 }, (err, stdout) => {
-        if (err && !stdout) return reject(err);
-        const i = stdout.lastIndexOf("\n");
-        const status = Number.parseInt(stdout.slice(i + 1), 10);
-        resolve({ status: Number.isNaN(status) ? 0 : status, body: stdout.slice(0, i) });
+  private async request(url: string, timeoutSec: number): Promise<{ status: number; body: string }> {
+    const abort = AbortSignal.timeout(timeoutSec * 1000);
+    try {
+      const response = await fetch(url, {
+        redirect: "follow",
+        signal: abort,
+        headers: {
+          "User-Agent": UA,
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "ru-RU,ru;q=0.9",
+          "Sec-Fetch-Dest": "document",
+          "Sec-Fetch-Mode": "navigate",
+          "Sec-Fetch-Site": "none",
+          "Upgrade-Insecure-Requests": "1",
+        },
       });
-    });
+      return { status: response.status, body: await response.text() };
+    } catch (error) {
+      // сетевой сбой или таймаут: обрабатывается как повторяемый, статусом 0
+      this.log("сетевая ошибка:", (error as Error).message);
+      return { status: 0, body: "" };
+    }
   }
 
   private noteFailure(status: number): void {
@@ -119,7 +111,7 @@ export class YmTransport {
       if (attempt > 0) await sleep(attempt * 1500 + Math.floor(Math.random() * 500));
       await this.throttle();
       try {
-        const { status, body } = await this.curl(url, timeoutSec);
+        const { status, body } = await this.request(url, timeoutSec);
         if (status === 404) {
           this.noteSuccess(status);
           return null;
@@ -131,6 +123,16 @@ export class YmTransport {
           continue;
         }
         if (status < 200 || status >= 300) throw new YmHttpError(status, url);
+
+        // Капча приходит с кодом 200, и без этой проверки приложение решило бы,
+        // что товар просто пропал, и записало бы «нет в продаже».
+        if (body.includes("Вы не робот") || body.includes("showcaptcha")) {
+          this.noteFailure(429);
+          lastError = new YmHttpError(429, url);
+          if (this.blockedForMs() > 0) throw new YmUnavailableError(this.blockedForMs());
+          continue;
+        }
+
         this.noteSuccess(status);
         return body;
       } catch (error) {

@@ -106,6 +106,22 @@ describe("разбор микроразметки Маркета", () => {
     assert.equal(items[0]?.inStock, false);
   });
 
+  it("при нескольких предложениях на товар берётся минимальная цена", () => {
+    // Маркет отдаёт по одному sku строки разных продавцов, и порядок меняется:
+    // взяв первую, приложение показывало бы скачки цены на пустом месте
+    const items = parseSearch(
+      searchHtml([
+        { sku: SKU, name: "Дороже", price: 827 },
+        { sku: SKU, name: "Дешевле", price: 788 },
+        { sku: "999", name: "Чужой", price: 10 },
+      ]),
+    );
+    const mine = items.filter((i) => i.sku === SKU);
+    const best = mine.reduce((a, b) => ((b.price as number) < (a.price as number) ? b : a));
+    assert.equal(mine.length, 2);
+    assert.equal(best.price, 788);
+  });
+
   it("не спотыкается о битый блок разметки", () => {
     const html = `<script type="application/ld+json">{сломано</script>${searchHtml([{ sku: SKU, name: "Товар", price: 100 }])}`;
     assert.equal(parseSearch(html).length, 1);
