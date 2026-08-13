@@ -41,8 +41,15 @@ services:
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
       DEFAULT_CHECK_INTERVAL_MIN: ${DEFAULT_CHECK_INTERVAL_MIN:-60}
       SELLER_SYNC_INTERVAL_HOURS: ${SELLER_SYNC_INTERVAL_HOURS:-12}
-      GOOGLE_SERVICE_ACCOUNT: ${GOOGLE_SERVICE_ACCOUNT:-}
+      # Путь внутри контейнера: ключ монтируется файлом, а не переменной.
+      # Многострочный приватный ключ в переменной окружения превращается в
+      # источник ошибок с экранированием, а в docker inspect он был бы виден.
+      GOOGLE_SERVICE_ACCOUNT: ${GOOGLE_SERVICE_ACCOUNT:-/run/secrets/google.json}
       SHEETS_EXPORT_INTERVAL_MIN: ${SHEETS_EXPORT_INTERVAL_MIN:-60}
+    volumes:
+      # Ключ сервисного аккаунта Google. Каталог secrets/ не попадает ни в git,
+      # ни в образ: он живёт только на сервере.
+      - ./secrets:/run/secrets:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:3000/api/health > /dev/null || exit 1"]
       interval: 30s

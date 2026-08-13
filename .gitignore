@@ -7,3 +7,10 @@ caddy_data/
 caddy_config/
 pgdata/
 .DS_Store
+
+# Ключи сервисных аккаунтов Google. В репозиторий не попадают никогда:
+# доступ по такому ключу не отзывается сменой пароля, только удалением ключа
+# в консоли Google.
+secrets/
+*service-account*.json
+watcher-*-*.json

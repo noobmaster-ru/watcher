@@ -83,12 +83,19 @@ function Header({ email }: { email: string }) {
 
   return (
     <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-      <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-4 px-4 py-3">
-        <button onClick={() => navigate("/")} className="text-lg font-semibold">
+      {/*
+        Шапка во всю ширину: логотип прижат к левому краю, за ним сразу вкладки.
+        Ничего не переносится на вторую строку — при нехватке места вкладки
+        прокручиваются по горизонтали, а длинная почта обрезается многоточием.
+        Раньше здесь были flex-wrap и max-w-5xl, и почта подлиннее выталкивала
+        «Настройки» на второй ряд.
+      */}
+      <div className="flex w-full items-center gap-3 px-4 py-3">
+        <button onClick={() => navigate("/")} className="shrink-0 text-lg font-semibold">
           <span className="text-wb">watcher</span>
         </button>
 
-        <nav className="flex flex-1 flex-wrap gap-1 text-sm">
+        <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <Tab to="/">Отслеживание</Tab>
           <Tab to="/add">Добавить</Tab>
           <Tab to="/keywords">Ключевые слова</Tab>
@@ -104,9 +111,11 @@ function Header({ email }: { email: string }) {
           <Tab to="/settings">Настройки</Tab>
         </nav>
 
-        <div className="flex items-center gap-3">
-          <span className="muted hidden sm:inline">{email}</span>
-          <button onClick={logout} className="muted hover:underline">
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="muted hidden max-w-[14rem] truncate lg:inline-block" title={email}>
+            {email}
+          </span>
+          <button onClick={logout} className="muted shrink-0 hover:underline">
             Выйти
           </button>
         </div>
@@ -129,7 +138,7 @@ function Tab({ to, children }: { to: string; children: React.ReactNode }) {
       to={to}
       end={to === "/"}
       className={({ isActive }) =>
-        `rounded-lg px-3 py-1.5 transition ${
+        `whitespace-nowrap rounded-lg px-3 py-1.5 transition ${
           isActive
             ? "bg-wb-light font-medium text-wb-dark dark:bg-wb-dark/30 dark:text-wb-light"
             : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
