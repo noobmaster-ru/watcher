@@ -294,9 +294,10 @@ describe("повтор после отказа Wildberries", () => {
     const { retryDelayMin } = await import("../services/keywords.js");
     const interval = 360; // шесть часов — обычный интервал проверки
 
-    assert.equal(retryDelayMin(1, interval), 10, "первый повтор — через десять минут");
-    assert.equal(retryDelayMin(2, interval), 20);
-    assert.equal(retryDelayMin(3, interval), 40);
+    // меньше получаса ждать бессмысленно: лимит WB столько и держится
+    assert.equal(retryDelayMin(1, interval), 30);
+    assert.equal(retryDelayMin(2, interval), 60);
+    assert.equal(retryDelayMin(3, interval), 120);
     assert.ok(
       retryDelayMin(10, interval) <= interval,
       "пауза после отказа не должна превышать обычный интервал: иначе один отказ WB оставляет пользователя без позиций на полдня",
@@ -311,6 +312,6 @@ describe("повтор после отказа Wildberries", () => {
     const [after] = await db.select().from(keywords).where(eq(keywords.id, keyword!.id));
 
     const waitMin = (after!.nextCheckAt.getTime() - Date.now()) / 60_000;
-    assert.ok(waitMin < 30, `повтор должен быть скоро, а не через ${Math.round(waitMin)} мин`);
+    assert.ok(waitMin >= 25 && waitMin <= 40, `повтор ожидался примерно через полчаса, получено ${Math.round(waitMin)} мин`);
   });
 });

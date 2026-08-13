@@ -39,8 +39,17 @@ const base64url = (value: string | Buffer): string =>
 export interface GoogleApi {
   /** Почта сервисного аккаунта: её пользователь указывает, открывая доступ к своей таблице. */
   readonly email: string;
-  /** Название и листы существующей таблицы. Заодно проверка, что доступ выдан. */
-  describe(spreadsheetId: string): Promise<{ title: string; sheets: string[]; url: string }>;
+  /** Название, листы и локаль таблицы. Заодно проверка, что доступ выдан. */
+  describe(spreadsheetId: string): Promise<{
+    title: string;
+    url: string;
+    locale: string;
+    sheets: Array<{ id: number; title: string }>;
+  }>;
+  /** Перезапись прямоугольника значений. Для листов-витрин, которые считаются заново. */
+  writeRange(spreadsheetId: string, range: string, rows: Array<Array<string | number | null>>): Promise<void>;
+  /** Оформление листа: закрепление, ширины колонок, высоты строк, жирная шапка. */
+  formatSheet(spreadsheetId: string, requests: unknown[]): Promise<void>;
   /** Первая строка листа: по ней видно, проставлены ли уже заголовки. */
   firstRow(spreadsheetId: string, sheet: string): Promise<string[]>;
   ensureSheets(spreadsheetId: string, sheets: string[]): Promise<void>;
@@ -107,19 +116,42 @@ export class GoogleSheetsApi implements GoogleApi {
     return body as T;
   }
 
-  async describe(spreadsheetId: string): Promise<{ title: string; sheets: string[]; url: string }> {
+  async describe(spreadsheetId: string) {
     const meta = await this.call<{
-      properties?: { title?: string };
+      properties?: { title?: string; locale?: string };
       spreadsheetUrl?: string;
-      sheets?: Array<{ properties?: { title?: string } }>;
-    }>(`${SHEETS_API}/${spreadsheetId}?fields=properties.title,spreadsheetUrl,sheets.properties.title`, {
-      method: "GET",
-    });
+      sheets?: Array<{ properties?: { sheetId?: number; title?: string } }>;
+    }>(
+      `${SHEETS_API}/${spreadsheetId}?fields=properties(title,locale),spreadsheetUrl,sheets.properties(sheetId,title)`,
+      { method: "GET" },
+    );
     return {
       title: meta.properties?.title ?? "",
+      locale: meta.properties?.locale ?? "en_US",
       url: meta.spreadsheetUrl ?? `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`,
-      sheets: (meta.sheets ?? []).map((sheet) => sheet.properties?.title ?? "").filter(Boolean),
+      sheets: (meta.sheets ?? [])
+        .map((sheet) => ({ id: sheet.properties?.sheetId ?? 0, title: sheet.properties?.title ?? "" }))
+        .filter((sheet) => sheet.title),
     };
+  }
+
+  async writeRange(
+    spreadsheetId: string,
+    range: string,
+    rows: Array<Array<string | number | null>>,
+  ): Promise<void> {
+    await this.call(
+      `${SHEETS_API}/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
+      { method: "PUT", body: JSON.stringify({ values: rows }) },
+    );
+  }
+
+  async formatSheet(spreadsheetId: string, requests: unknown[]): Promise<void> {
+    if (requests.length === 0) return;
+    await this.call(`${SHEETS_API}/${spreadsheetId}:batchUpdate`, {
+      method: "POST",
+      body: JSON.stringify({ requests }),
+    });
   }
 
   async firstRow(spreadsheetId: string, sheet: string): Promise<string[]> {
@@ -132,11 +164,8 @@ export class GoogleSheetsApi implements GoogleApi {
 
   /** Досоздаёт недостающие листы: таблицу мог править человек. */
   async ensureSheets(spreadsheetId: string, sheets: string[]): Promise<void> {
-    const meta = await this.call<{ sheets?: Array<{ properties?: { title?: string } }> }>(
-      `${SHEETS_API}/${spreadsheetId}?fields=sheets.properties.title`,
-      { method: "GET" },
-    );
-    const existing = new Set((meta.sheets ?? []).map((s) => s.properties?.title));
+    const meta = await this.describe(spreadsheetId);
+    const existing = new Set(meta.sheets.map((sheet) => sheet.title));
     const missing = sheets.filter((name) => !existing.has(name));
     if (missing.length === 0) return;
 

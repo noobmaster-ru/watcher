@@ -141,9 +141,27 @@ export class FakeGoogle {
     if (!book) throw new Error(`нет доступа к таблице ${spreadsheetId}`);
     return {
       title: this.titles.get(spreadsheetId) ?? "таблица",
-      sheets: [...book.keys()],
+      locale: "ru_RU",
       url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`,
+      sheets: [...book.keys()].map((title, index) => ({ id: index + 1, title })),
     };
+  }
+
+  /** Значения, записанные перезаписью диапазона (витрины). */
+  written = new Map<string, Array<Array<string | number | null>>>();
+  formatted: string[] = [];
+
+  async writeRange(spreadsheetId: string, range: string, rows: Array<Array<string | number | null>>) {
+    this.guard();
+    const sheet = range.split("!")[0]!;
+    this.written.set(`${spreadsheetId}:${sheet}`, rows);
+    const book = this.spreadsheets.get(spreadsheetId);
+    if (book) book.set(sheet, rows);
+  }
+
+  async formatSheet(spreadsheetId: string, requests: unknown[]) {
+    this.guard();
+    if (requests.length > 0) this.formatted.push(spreadsheetId);
   }
 
   async firstRow(spreadsheetId: string, sheet: string) {

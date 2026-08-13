@@ -9,10 +9,20 @@ import { eq, sql } from "drizzle-orm";
 import { db, rowsOf } from "../db/client.js";
 import { userSheets } from "../db/schema.js";
 import type { GoogleApi } from "./google.js";
+import {
+  SHEET_SUMMARY,
+  buildProductGrid,
+  buildSummaryGrid,
+  columnName,
+  dayRange,
+  loadSeries,
+  ownProducts,
+} from "./dashboard.js";
 
 export const SHEET_PRODUCTS = "Товары";
 export const SHEET_SELLERS = "Продавцы";
 export const SHEET_KEYWORDS = "Ключевые слова";
+/** Служебные листы: сюда история дописывается строками. */
 export const SHEETS = [SHEET_PRODUCTS, SHEET_SELLERS, SHEET_KEYWORDS];
 
 const HEADERS: Record<string, string[]> = {
@@ -40,6 +50,8 @@ export interface ExportResult {
   products: number;
   sellers: number;
   keywords: number;
+  /** Сколько листов-витрин перерисовано. */
+  dashboards: number;
 }
 
 /** Идентификатор таблицы из ссылки вида docs.google.com/spreadsheets/d/<id>/edit. */
@@ -143,11 +155,15 @@ export async function exportUser(api: GoogleApi, userId: number): Promise<Export
       })
       .where(eq(userSheets.userId, userId));
 
+    // Витрины считаются от всей истории, поэтому рисуются после дописывания.
+    const dashboards = await refreshDashboards(api, userId, state.spreadsheetId);
+
     return {
       spreadsheetUrl: sheet.spreadsheetUrl,
       products: products.rows,
       sellers: sellers.rows,
       keywords: keywords.rows,
+      dashboards,
     };
   } catch (error) {
     // Если таблицы ещё нет, обновлять нечего — запрос просто ничего не тронет.
@@ -277,3 +293,106 @@ export async function usersToExport(): Promise<number[]> {
   `);
   return rowsOf<{ id: number }>(result).map((r) => Number(r.id));
 }
+
+// ── листы-витрины ────────────────────────────────────────────────────────────
+/** Ширина колонки, пикселей. */
+const COL = { photo: 70, wide: 240, normal: 110, day: 58 };
+
+/**
+ * Оформление витрины: шапка закреплена и выделена, левые колонки закреплены
+ * (иначе при росте вправо непонятно, чей это ряд), строки повыше — под фото.
+ */
+function layoutRequests(sheetId: number, frozenColumns: number, headerRow: number, rowHeight: number): unknown[] {
+  return [
+    {
+      updateSheetProperties: {
+        properties: { sheetId, gridProperties: { frozenRowCount: headerRow, frozenColumnCount: frozenColumns } },
+        fields: "gridProperties.frozenRowCount,gridProperties.frozenColumnCount",
+      },
+    },
+    {
+      repeatCell: {
+        range: { sheetId, startRowIndex: headerRow - 1, endRowIndex: headerRow },
+        cell: { userEnteredFormat: { textFormat: { bold: true }, backgroundColor: { red: 0.95, green: 0.94, blue: 0.98 } } },
+        fields: "userEnteredFormat(textFormat,backgroundColor)",
+      },
+    },
+    {
+      updateDimensionProperties: {
+        range: { sheetId, dimension: "ROWS", startIndex: headerRow, endIndex: headerRow + 400 },
+        properties: { pixelSize: rowHeight },
+        fields: "pixelSize",
+      },
+    },
+    {
+      updateDimensionProperties: {
+        range: { sheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 1 },
+        properties: { pixelSize: COL.photo },
+        fields: "pixelSize",
+      },
+    },
+  ];
+}
+
+/** Перерисовывает сводку и личные листы товаров. */
+export async function refreshDashboards(api: GoogleApi, userId: number, spreadsheetId: string): Promise<number> {
+  const days = dayRange();
+  const series = await loadSeries(userId, days);
+  if (series.length === 0) return 0;
+
+  const own = ownProducts(series);
+  const sheetNames = [SHEET_SUMMARY, ...own.map((product) => String(product.nm))];
+  await api.ensureSheets(spreadsheetId, sheetNames);
+
+  const meta = await api.describe(spreadsheetId);
+  const idByTitle = new Map(meta.sheets.map((sheet) => [sheet.title, sheet.id]));
+
+  // ── сводка ──
+  const summary = buildSummaryGrid(series, days);
+  await api.clearSheet(spreadsheetId, SHEET_SUMMARY);
+  await api.writeRange(spreadsheetId, `${SHEET_SUMMARY}!A1`, summary);
+  const summaryId = idByTitle.get(SHEET_SUMMARY);
+  if (summaryId !== undefined) {
+    await api.formatSheet(spreadsheetId, [
+      ...layoutRequests(summaryId, 5, 1, 72),
+      {
+        updateDimensionProperties: {
+          range: { sheetId: summaryId, dimension: "COLUMNS", startIndex: 2, endIndex: 3 },
+          properties: { pixelSize: COL.wide },
+          fields: "pixelSize",
+        },
+      },
+    ]);
+  }
+
+  // ── личные листы товаров ──
+  for (const product of own) {
+    const title = String(product.nm);
+    await api.clearSheet(spreadsheetId, title);
+    await api.writeRange(spreadsheetId, `${title}!A1`, buildProductGrid(product, days));
+    const sheetId = idByTitle.get(title);
+    if (sheetId !== undefined) {
+      await api.formatSheet(spreadsheetId, [
+        ...layoutRequests(sheetId, 6, 4, 24),
+        {
+          updateDimensionProperties: {
+            range: { sheetId, dimension: "ROWS", startIndex: 0, endIndex: 3 },
+            properties: { pixelSize: 34 },
+            fields: "pixelSize",
+          },
+        },
+        {
+          updateDimensionProperties: {
+            range: { sheetId, dimension: "COLUMNS", startIndex: 1, endIndex: 2 },
+            properties: { pixelSize: COL.wide },
+            fields: "pixelSize",
+          },
+        },
+      ]);
+    }
+  }
+
+  return 1 + own.length;
+}
+
+export { columnName };
