@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api, type Product } from "../lib/api";
-import { money } from "../lib/format";
 import { ErrorBox, PriceTag, ProductThumb, Spinner } from "../components/ui";
 
 type Tab = "product" | "seller" | "search";
@@ -12,7 +11,7 @@ export function AddPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-1">
+      <div role="tablist" aria-label="Способ добавления" className="flex gap-1">
         <TabButton active={tab === "product"} onClick={() => setTab("product")}>
           По артикулу
         </TabButton>
@@ -42,6 +41,8 @@ function TabButton({
 }) {
   return (
     <button
+      role="tab"
+      aria-selected={active}
       onClick={onClick}
       className={`rounded-lg px-4 py-2 text-sm transition ${
         active
@@ -87,6 +88,7 @@ function AddProduct() {
           value={value}
           onChange={(event) => setValue(event.target.value)}
           required
+          autoFocus
         />
         <p className="muted mt-1">Артикул виден в адресе карточки после /catalog/</p>
       </div>
@@ -141,6 +143,7 @@ function AddSeller() {
             value={value}
             onChange={(event) => setValue(event.target.value)}
             required
+            autoFocus
           />
           <p className="muted mt-1">
             Подходит и числовой адрес (<code>/seller/809881</code>), и буквенный (
@@ -197,9 +200,16 @@ function SearchProducts() {
     mutationFn: (q: string) => api.get<{ items: Product[] }>(`/api/search?q=${encodeURIComponent(q)}&limit=24`),
   });
 
+  // Какие артикулы уже поставлены на отслеживание из этой выдачи: кнопка
+  // превращается в галочку, иначе непонятно, сработал клик или нет.
+  const [added, setAdded] = useState<ReadonlySet<string>>(new Set());
+
   const add = useMutation({
     mutationFn: (nm: string) => api.post("/api/watches", { kind: "product", product: nm }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["watches"] }),
+    onSuccess: (_data, nm) => {
+      setAdded((prev) => new Set(prev).add(nm));
+      void queryClient.invalidateQueries({ queryKey: ["watches"] });
+    },
   });
 
   return (
@@ -223,6 +233,7 @@ function SearchProducts() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             required
+            autoFocus
           />
           <p className="muted mt-1">
             Поиск Wildberries жёстко ограничивает частые запросы. Если выдача пустая — подождите минуту и повторите.
@@ -235,6 +246,7 @@ function SearchProducts() {
 
       {search.isPending && <Spinner label="Спрашиваю Wildberries…" />}
       {search.error != null && <ErrorBox error={search.error} />}
+      {add.error != null && <ErrorBox error={add.error} />}
 
       {search.data && (
         <div className="space-y-2">
@@ -242,22 +254,28 @@ function SearchProducts() {
             Найдено {search.data.items.length} по запросу «{submitted}»
           </p>
           {search.data.items.map((item) => (
-            <div key={item.nm} className="card flex items-center gap-4">
+            <div key={item.nm} className="card flex flex-wrap items-center gap-x-4 gap-y-2">
               <ProductThumb nm={item.nm} image={item.image} name={item.name} />
-              <div className="min-w-0 flex-1">
+              <div className="min-w-[12rem] flex-1">
                 <p className="truncate font-medium">{item.name}</p>
                 <p className="muted truncate">
                   {item.brand} · {item.supplier}
                 </p>
-                <p className="muted">Артикул {item.nm}</p>
+                <p className="muted nums">Артикул {item.nm}</p>
               </div>
-              <div className="text-right">
+              <div className="ml-auto text-right">
                 <PriceTag price={item.price.product} basic={item.price.basic} />
                 {item.rating !== null && <p className="muted">★ {item.rating}</p>}
               </div>
-              <button className="btn-ghost" onClick={() => add.mutate(item.nm)} disabled={add.isPending}>
-                Отслеживать
-              </button>
+              {added.has(item.nm) ? (
+                <span className="btn-ghost pointer-events-none text-emerald-600 dark:text-emerald-400">
+                  Отслеживается ✓
+                </span>
+              ) : (
+                <button className="btn-ghost" onClick={() => add.mutate(item.nm)} disabled={add.isPending}>
+                  Отслеживать
+                </button>
+              )}
             </div>
           ))}
           {search.data.items.length === 0 && <p className="muted">Ничего не нашлось — попробуйте другой запрос.</p>}

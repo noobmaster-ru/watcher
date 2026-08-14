@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { api, type Product, type Seller } from "../lib/api";
-import { ErrorBox, PriceTag, ProductThumb, Spinner } from "../components/ui";
+import { ErrorBox, ListSkeleton, PriceTag, ProductThumb, Spinner } from "../components/ui";
 
 export function SellerPage() {
   const { id } = useParams<{ id: string }>();
@@ -38,9 +38,15 @@ export function SellerPage() {
     },
   });
 
+  // Какие артикулы уже добавлены с этой страницы — кнопка меняется на галочку
+  const [added, setAdded] = useState<ReadonlySet<string>>(new Set());
+
   const watchProduct = useMutation({
     mutationFn: (nm: string) => api.post("/api/watches", { kind: "product", product: nm }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["watches"] }),
+    onSuccess: (_data, nm) => {
+      setAdded((prev) => new Set(prev).add(nm));
+      void queryClient.invalidateQueries({ queryKey: ["watches"] });
+    },
   });
 
   if (seller.isLoading) return <Spinner label="Спрашиваю Wildberries…" />;
@@ -83,6 +89,7 @@ export function SellerPage() {
         </div>
 
         {watchSeller.error != null && <ErrorBox error={watchSeller.error} />}
+        {unwatch.error != null && <ErrorBox error={unwatch.error} />}
         {watchSeller.data && (
           <p className="text-sm text-emerald-600">
             Под наблюдением {watchSeller.data.productCount} товаров. Новые позиции продавца будут добавляться сами.
@@ -94,7 +101,12 @@ export function SellerPage() {
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Каталог</h2>
           <div className="flex items-center gap-2">
-            <button className="btn-ghost px-3 py-1" disabled={page === 1} onClick={() => setPage(page - 1)}>
+            <button
+              className="btn-ghost px-3 py-1"
+              disabled={page === 1}
+              onClick={() => setPage(page - 1)}
+              aria-label="Предыдущая страница"
+            >
               ←
             </button>
             <span className="muted">стр. {page}</span>
@@ -102,14 +114,16 @@ export function SellerPage() {
               className="btn-ghost px-3 py-1"
               disabled={(catalog.data?.products.length ?? 0) < 100}
               onClick={() => setPage(page + 1)}
+              aria-label="Следующая страница"
             >
               →
             </button>
           </div>
         </div>
 
-        {catalog.isLoading && <Spinner />}
+        {catalog.isLoading && <ListSkeleton rows={5} />}
         {catalog.error != null && <ErrorBox error={catalog.error} />}
+        {watchProduct.error != null && <ErrorBox error={watchProduct.error} />}
 
         {catalog.data?.products.length === 0 && (
           <p className="muted card">
@@ -119,21 +133,31 @@ export function SellerPage() {
         )}
 
         {catalog.data?.products.map((item) => (
-          <div key={item.nm} className="card flex items-center gap-4">
+          <div key={item.nm} className="card flex flex-wrap items-center gap-x-4 gap-y-2">
             <ProductThumb nm={item.nm} image={item.image} name={item.name} />
-            <div className="min-w-0 flex-1">
+            <div className="min-w-[12rem] flex-1">
               <p className="truncate font-medium">{item.name}</p>
               <p className="muted truncate">
-                {item.brand} · артикул {item.nm}
+                {item.brand} · артикул <span className="nums">{item.nm}</span>
               </p>
             </div>
-            <div className="text-right">
+            <div className="ml-auto text-right">
               <PriceTag price={item.price.product} basic={item.price.basic} />
               {!item.inStock && <p className="text-xs text-amber-600">нет в наличии</p>}
             </div>
-            <button className="btn-ghost" onClick={() => watchProduct.mutate(item.nm)} disabled={watchProduct.isPending}>
-              Отслеживать
-            </button>
+            {added.has(item.nm) ? (
+              <span className="btn-ghost pointer-events-none text-emerald-600 dark:text-emerald-400">
+                Отслеживается ✓
+              </span>
+            ) : (
+              <button
+                className="btn-ghost"
+                onClick={() => watchProduct.mutate(item.nm)}
+                disabled={watchProduct.isPending}
+              >
+                Отслеживать
+              </button>
+            )}
           </div>
         ))}
       </section>

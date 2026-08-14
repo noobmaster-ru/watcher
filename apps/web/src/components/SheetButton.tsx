@@ -1,20 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { api } from "../lib/api";
-
-interface SheetSide {
-  url: string | null;
-  lastExportAt: string | null;
-  lastError: string | null;
-}
-
-interface SheetState {
-  available: boolean;
-  serviceAccountEmail: string | null;
-  wb: SheetSide;
-  ym: SheetSide;
-}
+import { api, type SheetSide, type SheetState } from "../lib/api";
 
 /**
  * Кнопка «Гугл-таблица» с выпадающим списком площадок.
@@ -64,7 +51,7 @@ export function SheetButton() {
     );
   }
 
-  const open_ = (side: SheetSide | undefined) => {
+  const openSide = (side: SheetSide | undefined) => {
     setOpen(false);
     if (side?.url) window.open(side.url, "_blank", "noopener,noreferrer");
     else navigate("/settings");
@@ -78,24 +65,37 @@ export function SheetButton() {
         onClick={() => setOpen(!open)}
         className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
         aria-expanded={open}
+        aria-haspopup="menu"
       >
         Гугл-таблица
-        <span className={`text-[10px] transition ${open ? "rotate-180" : ""}`}>▼</span>
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          fill="none"
+          aria-hidden="true"
+          className={`transition ${open ? "rotate-180" : ""}`}
+        >
+          <path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
+        <div
+          role="menu"
+          className="absolute left-0 top-full z-20 mt-1 w-56 animate-fade-in overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900"
+        >
           <SheetItem
             label="Wildberries"
             side={sheet.data?.wb}
             connected={connected(sheet.data?.wb)}
-            onClick={() => open_(sheet.data?.wb)}
+            onClick={() => openSide(sheet.data?.wb)}
           />
           <SheetItem
             label="Яндекс Маркет"
             side={sheet.data?.ym}
             connected={connected(sheet.data?.ym)}
-            onClick={() => open_(sheet.data?.ym)}
+            onClick={() => openSide(sheet.data?.ym)}
           />
         </div>
       )}
@@ -116,6 +116,7 @@ function SheetItem({
 }) {
   return (
     <button
+      role="menuitem"
       onClick={onClick}
       className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition hover:bg-slate-100 dark:hover:bg-slate-800"
     >

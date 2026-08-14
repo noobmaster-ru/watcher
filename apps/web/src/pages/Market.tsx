@@ -1,31 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { api, type YmProduct, type YmWatch } from "../lib/api";
 import { formatDate, money } from "../lib/format";
-import { Delta, Empty, ErrorBox, Spinner } from "../components/ui";
-
-interface YmWatch {
-  id: number;
-  sku: string;
-  name: string | null;
-  image: string | null;
-  url: string | null;
-  lastPrice: number | null;
-  lastInStock: boolean | null;
-  lastCheckedAt: string | null;
-  intervalMin: number;
-  priceDayAgo: number | null;
-  priceWeekAgo: number | null;
-}
-
-interface YmProduct {
-  sku: string;
-  name: string | null;
-  price: number | null;
-  inStock: boolean;
-  image: string | null;
-  url: string;
-}
+import { Delta, Empty, ErrorBox, ListSkeleton, RemoveButton } from "../components/ui";
 
 export function MarketPage() {
   const queryClient = useQueryClient();
@@ -93,7 +70,7 @@ export function MarketPage() {
             попросит выбрать. Не знаете номер — воспользуйтесь поиском ниже.
           </p>
         </div>
-        {add.error != null && <ErrorBox error={add.error} />}
+        {add.error != null && !candidates && <ErrorBox error={add.error} />}
         <button className="btn-primary" disabled={add.isPending || input.trim().length < 4}>
           {add.isPending ? "Смотрю на Маркете…" : "Отслеживать цену"}
         </button>
@@ -105,7 +82,7 @@ export function MarketPage() {
               <div key={item.sku} className="flex items-center gap-3">
                 {item.image && <img src={item.image} alt="" className="h-10 w-10 rounded object-cover" />}
                 <span className="min-w-0 flex-1 truncate text-sm">{item.name}</span>
-                <span className="font-semibold">{money(item.price)}</span>
+                <span className="nums font-semibold">{money(item.price)}</span>
                 <button type="button" className="btn-ghost" onClick={() => add.mutate(item.sku)}>
                   Это он
                 </button>
@@ -142,13 +119,16 @@ export function MarketPage() {
         {search.data && (
           <div className="space-y-2">
             {search.data.items.map((item) => (
-              <div key={item.sku} className="flex items-center gap-3 border-t border-slate-100 pt-2 dark:border-slate-800">
+              <div
+                key={item.sku}
+                className="flex items-center gap-3 border-t border-slate-100 pt-2 dark:border-slate-800"
+              >
                 {item.image && <img src={item.image} alt="" className="h-12 w-12 rounded object-cover" />}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm">{item.name}</p>
-                  <p className="muted">№ {item.sku}</p>
+                  <p className="muted nums">№ {item.sku}</p>
                 </div>
-                <span className="font-semibold">{money(item.price)}</span>
+                <span className="nums font-semibold">{money(item.price)}</span>
                 <button className="btn-ghost" onClick={() => add.mutate(item.sku)} disabled={add.isPending}>
                   Отслеживать
                 </button>
@@ -159,8 +139,9 @@ export function MarketPage() {
         )}
       </form>
 
-      {watches.isLoading && <Spinner />}
+      {watches.isLoading && <ListSkeleton rows={3} />}
       {watches.error != null && <ErrorBox error={watches.error} />}
+      {remove.error != null && <ErrorBox error={remove.error} />}
 
       {!watches.isLoading && items.length === 0 && (
         <Empty title="С Яндекс Маркета пока ничего не отслеживается">
@@ -172,14 +153,14 @@ export function MarketPage() {
         <section className="space-y-2">
           <h2 className="text-lg font-semibold">Товары Маркета ({items.length})</h2>
           {items.map((watch) => (
-            <div key={watch.id} className="card flex items-center gap-4">
+            <div key={watch.id} className="card flex flex-wrap items-center gap-x-4 gap-y-2">
               {watch.image ? (
-                <img src={watch.image} alt="" className="h-16 w-12 rounded-md object-cover" />
+                <img src={watch.image} alt="" className="h-16 w-12 shrink-0 rounded-md object-cover" />
               ) : (
-                <div className="h-16 w-12 rounded-md bg-slate-100 dark:bg-slate-800" />
+                <div className="h-16 w-12 shrink-0 rounded-md bg-slate-100 dark:bg-slate-800" />
               )}
 
-              <div className="min-w-0 flex-1">
+              <div className="min-w-[12rem] flex-1">
                 <a
                   href={watch.url ?? `https://market.yandex.ru/search?text=${watch.sku}`}
                   target="_blank"
@@ -188,13 +169,17 @@ export function MarketPage() {
                 >
                   {watch.name ?? `Товар ${watch.sku}`}
                 </a>
-                <p className="muted">№ {watch.sku}</p>
+                <p className="muted nums">№ {watch.sku}</p>
                 <p className="muted">последняя проверка {formatDate(watch.lastCheckedAt)}</p>
               </div>
 
-              <div className="text-right">
-                <p className="text-lg font-semibold">
-                  {watch.lastPrice === null ? <span className="text-slate-400">нет в продаже</span> : money(watch.lastPrice)}
+              <div className="ml-auto text-right">
+                <p className="nums text-lg font-semibold">
+                  {watch.lastPrice === null ? (
+                    <span className="text-slate-400">нет в продаже</span>
+                  ) : (
+                    money(watch.lastPrice)
+                  )}
                 </p>
                 <div className="muted flex justify-end gap-3">
                   <span>
@@ -206,9 +191,10 @@ export function MarketPage() {
                 </div>
               </div>
 
-              <button onClick={() => remove.mutate(watch.id)} className="muted hover:text-red-600" title="Убрать">
-                ✕
-              </button>
+              <RemoveButton
+                onConfirm={() => remove.mutate(watch.id)}
+                pending={remove.isPending && remove.variables === watch.id}
+              />
             </div>
           ))}
         </section>

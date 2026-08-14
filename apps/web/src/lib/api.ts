@@ -139,3 +139,62 @@ export interface Health {
     hosts: Array<{ host: string; state: string; lastStatus: number | null }>;
   };
 }
+
+export interface Me {
+  user: { id: number; email: string };
+}
+
+export interface SheetSide {
+  url: string | null;
+  lastExportAt: string | null;
+  lastError: string | null;
+}
+
+export interface SheetState {
+  available: boolean;
+  serviceAccountEmail: string | null;
+  wb: SheetSide;
+  ym: SheetSide;
+}
+
+export interface KeywordPosition {
+  nm: number;
+  position: number | null;
+  page: number | null;
+  checkedAt: string;
+  name: string | null;
+}
+
+export interface Keyword {
+  id: number;
+  phrase: string;
+  isActive: boolean;
+  maxPages: number;
+  intervalMin: number;
+  lastCheckedAt: string | null;
+  lastTotal: number | null;
+  positions: KeywordPosition[];
+}
+
+export interface YmWatch {
+  id: number;
+  sku: string;
+  name: string | null;
+  image: string | null;
+  url: string | null;
+  lastPrice: number | null;
+  lastInStock: boolean | null;
+  lastCheckedAt: string | null;
+  intervalMin: number;
+  priceDayAgo: number | null;
+  priceWeekAgo: number | null;
+}
+
+export interface YmProduct {
+  sku: string;
+  name: string | null;
+  price: number | null;
+  inStock: boolean;
+  image: string | null;
+  url: string;
+}

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type Alert } from "../lib/api";
 import { ALERT_ICONS, ALERT_LABELS, formatDate, money, percentChange } from "../lib/format";
-import { Empty, ErrorBox, Spinner } from "../components/ui";
+import { Empty, ErrorBox, ListSkeleton } from "../components/ui";
 
 export function AlertsPage() {
   const queryClient = useQueryClient();
@@ -17,7 +17,7 @@ export function AlertsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["alerts"] }),
   });
 
-  if (alerts.isLoading) return <Spinner />;
+  if (alerts.isLoading) return <ListSkeleton rows={4} />;
   if (alerts.error) return <ErrorBox error={alerts.error} />;
 
   const items = alerts.data?.alerts ?? [];
@@ -42,17 +42,23 @@ export function AlertsPage() {
         )}
       </div>
 
+      {markRead.error != null && <ErrorBox error={markRead.error} />}
+
       <div className="space-y-2">
         {items.map((alert) => {
           const pct = percentChange(alert.oldPrice, alert.newPrice);
           return (
             <div
               key={alert.id}
-              className={`card flex items-center gap-4 ${alert.readAt ? "" : "border-l-4 border-l-wb"}`}
+              className={`card flex flex-wrap items-center gap-x-4 gap-y-2 ${
+                alert.readAt ? "" : "border-l-4 border-l-wb"
+              }`}
             >
-              <span className="text-2xl">{ALERT_ICONS[alert.type]}</span>
+              <span className="text-2xl" aria-hidden="true">
+                {ALERT_ICONS[alert.type]}
+              </span>
 
-              <div className="min-w-0 flex-1">
+              <div className="min-w-[12rem] flex-1">
                 <Link to={`/product/${alert.nm}`} className="block truncate font-medium hover:text-wb">
                   {alert.name ?? `Артикул ${alert.nm}`}
                 </Link>
@@ -62,9 +68,9 @@ export function AlertsPage() {
                 </p>
               </div>
 
-              <div className="text-right">
+              <div className="ml-auto text-right">
                 {alert.oldPrice !== null && alert.newPrice !== null ? (
-                  <p>
+                  <p className="nums">
                     <s className="muted">{money(alert.oldPrice)}</s>{" "}
                     <span className="font-semibold">{money(alert.newPrice)}</span>
                     {pct !== null && (
@@ -76,7 +82,7 @@ export function AlertsPage() {
                     )}
                   </p>
                 ) : (
-                  <p className="font-semibold">{money(alert.newPrice)}</p>
+                  <p className="nums font-semibold">{money(alert.newPrice)}</p>
                 )}
                 <p className="muted">{formatDate(alert.createdAt)}</p>
               </div>

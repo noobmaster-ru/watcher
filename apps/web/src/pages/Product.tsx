@@ -12,7 +12,7 @@ import {
 } from "recharts";
 import { api, type PricePoint, type Product } from "../lib/api";
 import { money, walletPrice } from "../lib/format";
-import { ErrorBox, Spinner } from "../components/ui";
+import { ErrorBox, Spinner, chartTooltipStyle } from "../components/ui";
 
 const RANGES = [
   { id: "24h", label: "Сутки" },
@@ -85,7 +85,7 @@ export function ProductPage() {
           <div>
             <h1 className="text-xl font-semibold">{item.name}</h1>
             <p className="muted">
-              {item.brand} · артикул {item.nm}
+              {item.brand} · артикул <span className="nums">{item.nm}</span>
             </p>
           </div>
 
@@ -103,8 +103,8 @@ export function ProductPage() {
               <span className="text-lg font-semibold text-slate-400">нет в продаже</span>
             ) : (
               <>
-                <span className="text-3xl font-bold">{money(item.price.product)}</span>
-                {item.price.basic !== null && <s className="muted text-lg">{money(item.price.basic)}</s>}
+                <span className="nums text-3xl font-bold">{money(item.price.product)}</span>
+                {item.price.basic !== null && <s className="muted nums text-lg">{money(item.price.basic)}</s>}
               </>
             )}
           </div>
@@ -140,17 +140,21 @@ export function ProductPage() {
               Открыть на WB
             </a>
           </div>
+
+          {watch.error != null && <ErrorBox error={watch.error} />}
+          {unwatch.error != null && <ErrorBox error={unwatch.error} />}
         </div>
       </div>
 
       <section className="card">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-semibold">История цены</h2>
-          <div className="flex gap-1">
+          <div className="flex gap-1" role="group" aria-label="Период истории">
             {RANGES.map((option) => (
               <button
                 key={option.id}
                 onClick={() => setRange(option.id)}
+                aria-pressed={range === option.id}
                 className={`rounded-md px-2.5 py-1 text-xs transition ${
                   range === option.id
                     ? "bg-wb text-white"
@@ -184,6 +188,8 @@ export function ProductPage() {
                     <stop offset="100%" stopColor="#7b32c9" stopOpacity={0} />
                   </linearGradient>
                 </defs>
+                {/* #94a3b8 (slate-400) читается на светлом и тёмном фоне: SVG-атрибуты
+                    recharts не понимают var(), поэтому цвет один на обе темы. */}
                 <CartesianGrid strokeDasharray="3 3" stroke="#94a3b833" />
                 <XAxis
                   dataKey="time"
@@ -206,7 +212,7 @@ export function ProductPage() {
                 <Tooltip
                   labelFormatter={(value) => new Date(value as number).toLocaleString("ru-RU")}
                   formatter={(value) => [money(value as number), "Цена"]}
-                  contentStyle={{ borderRadius: 8, border: "1px solid #cbd5e1", fontSize: 13 }}
+                  contentStyle={chartTooltipStyle}
                 />
                 <Area
                   type="stepAfter"

@@ -1,28 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api } from "../lib/api";
+import { api, type Keyword } from "../lib/api";
 import { formatDate, formatInterval } from "../lib/format";
-import { Empty, ErrorBox, Spinner } from "../components/ui";
-
-interface Position {
-  nm: number;
-  position: number | null;
-  page: number | null;
-  checkedAt: string;
-  name: string | null;
-}
-
-interface Keyword {
-  id: number;
-  phrase: string;
-  isActive: boolean;
-  maxPages: number;
-  intervalMin: number;
-  lastCheckedAt: string | null;
-  lastTotal: number | null;
-  positions: Position[];
-}
+import { Empty, ErrorBox, ListSkeleton, RemoveButton } from "../components/ui";
 
 export function KeywordsPage() {
   const queryClient = useQueryClient();
@@ -34,7 +15,8 @@ export function KeywordsPage() {
   });
 
   const add = useMutation({
-    mutationFn: (value: string) => api.post<{ found: number; scanned: number; note?: string }>("/api/keywords", { phrase: value }),
+    mutationFn: (value: string) =>
+      api.post<{ found: number; scanned: number; note?: string }>("/api/keywords", { phrase: value }),
     onSuccess: () => {
       setPhrase("");
       void queryClient.invalidateQueries({ queryKey: ["keywords"] });
@@ -85,8 +67,9 @@ export function KeywordsPage() {
         </button>
       </form>
 
-      {keywords.isLoading && <Spinner />}
+      {keywords.isLoading && <ListSkeleton rows={2} />}
       {keywords.error != null && <ErrorBox error={keywords.error} />}
+      {remove.error != null && <ErrorBox error={remove.error} />}
 
       {!keywords.isLoading && items.length === 0 && (
         <Empty title="Ключевых слов пока нет">
@@ -105,9 +88,11 @@ export function KeywordsPage() {
                 {keyword.lastTotal !== null && ` · просмотрено ${keyword.lastTotal} позиций выдачи`}
               </p>
             </div>
-            <button onClick={() => remove.mutate(keyword.id)} className="muted hover:text-red-600" title="Удалить">
-              ✕
-            </button>
+            <RemoveButton
+              onConfirm={() => remove.mutate(keyword.id)}
+              pending={remove.isPending && remove.variables === keyword.id}
+              label={`Удалить запрос «${keyword.phrase}»`}
+            />
           </div>
 
           {keyword.positions.length === 0 ? (
@@ -116,37 +101,39 @@ export function KeywordsPage() {
               трёхсотого места.
             </p>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="muted text-left">
-                  <th className="pb-1 font-normal">Позиция</th>
-                  <th className="pb-1 font-normal">Товар</th>
-                  <th className="pb-1 text-right font-normal">Артикул</th>
-                </tr>
-              </thead>
-              <tbody>
-                {keyword.positions.map((position) => (
-                  <tr key={position.nm} className="border-t border-slate-100 dark:border-slate-800">
-                    <td className="py-1.5">
-                      {position.position === null ? (
-                        <span className="text-amber-600">выпал</span>
-                      ) : (
-                        <span className="font-semibold">
-                          {position.position}
-                          <span className="muted font-normal"> · стр. {position.page}</span>
-                        </span>
-                      )}
-                    </td>
-                    <td className="max-w-xs truncate py-1.5">
-                      <Link to={`/product/${position.nm}`} className="hover:text-wb">
-                        {position.name ?? "—"}
-                      </Link>
-                    </td>
-                    <td className="py-1.5 text-right tabular-nums">{position.nm}</td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="muted text-left">
+                    <th className="pb-1 font-normal">Позиция</th>
+                    <th className="pb-1 font-normal">Товар</th>
+                    <th className="pb-1 text-right font-normal">Артикул</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {keyword.positions.map((position) => (
+                    <tr key={position.nm} className="border-t border-slate-100 dark:border-slate-800">
+                      <td className="py-1.5">
+                        {position.position === null ? (
+                          <span className="text-amber-600">выпал</span>
+                        ) : (
+                          <span className="nums font-semibold">
+                            {position.position}
+                            <span className="muted font-normal"> · стр. {position.page}</span>
+                          </span>
+                        )}
+                      </td>
+                      <td className="max-w-xs truncate py-1.5">
+                        <Link to={`/product/${position.nm}`} className="hover:text-wb">
+                          {position.name ?? "—"}
+                        </Link>
+                      </td>
+                      <td className="nums py-1.5 text-right">{position.nm}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </section>
       ))}

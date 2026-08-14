@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Health } from "../lib/api";
+import { api, type Health, type Me, type SheetSide, type SheetState } from "../lib/api";
 import { ErrorBox, Spinner } from "../components/ui";
 
 interface Settings {
@@ -8,11 +8,8 @@ interface Settings {
 }
 
 export function SettingsPage() {
-  const queryClient = useQueryClient();
-
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => api.get<Settings>("/api/settings") });
   const health = useQuery({ queryKey: ["health"], queryFn: () => api.get<Health>("/api/health") });
-
 
   if (settings.isLoading) return <Spinner />;
   if (settings.error) return <ErrorBox error={settings.error} />;
@@ -64,21 +61,7 @@ export function SettingsPage() {
   );
 }
 
-interface SheetSide {
-  url: string | null;
-  lastExportAt: string | null;
-  lastError: string | null;
-}
-
-interface SheetState {
-  available: boolean;
-  serviceAccountEmail: string | null;
-  wb: SheetSide;
-  ym: SheetSide;
-}
-
 function GoogleSheet() {
-  const queryClient = useQueryClient();
   const [copied, setCopied] = useState(false);
   const sheet = useQuery({ queryKey: ["sheet"], queryFn: () => api.get<SheetState>("/api/sheet") });
 
@@ -218,7 +201,7 @@ function MarketplaceSheet({
 
 function ChangeEmail() {
   const queryClient = useQueryClient();
-  const me = useQuery({ queryKey: ["me"], queryFn: () => api.get<{ user: { email: string } }>("/api/me") });
+  const me = useQuery({ queryKey: ["me"], queryFn: () => api.get<Me>("/api/me") });
   const [email, setEmail] = useState("");
   const [current, setCurrent] = useState("");
   const [done, setDone] = useState<{ email: string } | null>(null);

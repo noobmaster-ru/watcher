@@ -1,21 +1,21 @@
+import { Suspense, lazy } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { NavLink, Navigate, Route, Routes, useNavigate } from "react-router-dom";
-import { api, type Alert, type Health } from "./lib/api";
+import { api, type Alert, type Health, type Me } from "./lib/api";
 import { Spinner } from "./components/ui";
-import { LoginPage } from "./pages/Login";
-import { DashboardPage } from "./pages/Dashboard";
-import { AddPage } from "./pages/Add";
-import { ProductPage } from "./pages/Product";
-import { SellerPage } from "./pages/Seller";
-import { AlertsPage } from "./pages/Alerts";
-import { SettingsPage } from "./pages/Settings";
-import { KeywordsPage } from "./pages/Keywords";
-import { MarketPage } from "./pages/Market";
 import { SheetButton } from "./components/SheetButton";
 
-interface Me {
-  user: { id: number; email: string };
-}
+// Страницы грузятся лениво: тяжёлый recharts нужен только карточке товара,
+// и без code splitting он попадал бы в бандл каждого экрана, включая логин.
+const LoginPage = lazy(() => import("./pages/Login").then((m) => ({ default: m.LoginPage })));
+const DashboardPage = lazy(() => import("./pages/Dashboard").then((m) => ({ default: m.DashboardPage })));
+const AddPage = lazy(() => import("./pages/Add").then((m) => ({ default: m.AddPage })));
+const ProductPage = lazy(() => import("./pages/Product").then((m) => ({ default: m.ProductPage })));
+const SellerPage = lazy(() => import("./pages/Seller").then((m) => ({ default: m.SellerPage })));
+const AlertsPage = lazy(() => import("./pages/Alerts").then((m) => ({ default: m.AlertsPage })));
+const SettingsPage = lazy(() => import("./pages/Settings").then((m) => ({ default: m.SettingsPage })));
+const KeywordsPage = lazy(() => import("./pages/Keywords").then((m) => ({ default: m.KeywordsPage })));
+const MarketPage = lazy(() => import("./pages/Market").then((m) => ({ default: m.MarketPage })));
 
 export function App() {
   const me = useQuery({
@@ -34,10 +34,12 @@ export function App() {
 
   if (!me.data) {
     return (
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
+      <Suspense fallback={null}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </Suspense>
     );
   }
 
@@ -45,17 +47,19 @@ export function App() {
     <div className="min-h-screen">
       <Header email={me.data.user.email} />
       <main className="mx-auto max-w-5xl px-4 py-6">
-        <Routes>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/add" element={<AddPage />} />
-          <Route path="/product/:nm" element={<ProductPage />} />
-          <Route path="/seller/:id" element={<SellerPage />} />
-          <Route path="/market" element={<MarketPage />} />
-          <Route path="/keywords" element={<KeywordsPage />} />
-          <Route path="/alerts" element={<AlertsPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense fallback={<Spinner />}>
+          <Routes>
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/add" element={<AddPage />} />
+            <Route path="/product/:nm" element={<ProductPage />} />
+            <Route path="/seller/:id" element={<SellerPage />} />
+            <Route path="/market" element={<MarketPage />} />
+            <Route path="/keywords" element={<KeywordsPage />} />
+            <Route path="/alerts" element={<AlertsPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   );
@@ -84,7 +88,7 @@ function Header({ email }: { email: string }) {
   const degraded = health.data && health.data.wb.state !== "ok";
 
   return (
-    <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+    <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-900/90">
       {/*
         Шапка во всю ширину: логотип прижат к левому краю, за ним сразу вкладки.
         Ничего не переносится на вторую строку — при нехватке места вкладки
@@ -97,7 +101,10 @@ function Header({ email }: { email: string }) {
           <span className="text-wb">watcher</span>
         </button>
 
-        <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <nav
+          aria-label="Основная навигация"
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
           <Tab to="/">Отслеживание</Tab>
           <Tab to="/add">Добавить</Tab>
           <Tab to="/market">Яндекс Маркет</Tab>
