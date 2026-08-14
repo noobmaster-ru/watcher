@@ -88,7 +88,7 @@ function Header({ email }: { email: string }) {
   const degraded = health.data && health.data.wb.state !== "ok";
 
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-900/90">
+    <header className="sticky top-0 z-30 border-b border-slate-200/60 bg-white/70 backdrop-blur-xl dark:border-slate-800/60 dark:bg-slate-950/70">
       {/*
         Шапка во всю ширину: логотип прижат к левому краю, за ним сразу вкладки.
         Ничего не переносится на вторую строку — при нехватке места вкладки
@@ -97,8 +97,8 @@ function Header({ email }: { email: string }) {
         «Настройки» на второй ряд.
       */}
       <div className="flex w-full items-center gap-3 px-4 py-3">
-        <button onClick={() => navigate("/")} className="shrink-0 text-lg font-semibold">
-          <span className="text-wb">watcher</span>
+        <button onClick={() => navigate("/")} className="shrink-0 text-lg">
+          <span className="wordmark">watcher</span>
         </button>
 
         <nav
@@ -112,7 +112,7 @@ function Header({ email }: { email: string }) {
           <Tab to="/alerts">
             События
             {(alerts.data?.unread ?? 0) > 0 && (
-              <span className="ml-1 rounded-full bg-wb px-1.5 py-0.5 text-xs text-white">
+              <span className="ml-1 rounded-full bg-gradient-to-r from-wb to-fuchsia-500 px-1.5 py-0.5 text-xs font-semibold text-white">
                 {alerts.data?.unread}
               </span>
             )}
@@ -148,10 +148,10 @@ function Tab({ to, children }: { to: string; children: React.ReactNode }) {
       to={to}
       end={to === "/"}
       className={({ isActive }) =>
-        `whitespace-nowrap rounded-lg px-3 py-1.5 transition ${
+        `whitespace-nowrap rounded-full px-3 py-1.5 transition ${
           isActive
-            ? "bg-wb-light font-medium text-wb-dark dark:bg-wb-dark/30 dark:text-wb-light"
-            : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            ? "bg-wb/10 font-semibold text-wb dark:bg-wb/25 dark:text-wb-light"
+            : "text-slate-600 hover:bg-slate-900/5 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white"
         }`
       }
     >

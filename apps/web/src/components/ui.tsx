@@ -50,7 +50,13 @@ export function ErrorBox({ error }: { error: unknown }) {
 export function Empty({ title, action, children }: { title: string; action?: ReactNode; children?: ReactNode }) {
   return (
     <div className="card flex flex-col items-center gap-2 py-12 text-center">
-      <p className="font-medium">{title}</p>
+      <div
+        aria-hidden="true"
+        className="mb-1 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-wb/15 to-fuchsia-500/15 text-xl"
+      >
+        ✨
+      </div>
+      <p className="font-semibold">{title}</p>
       {children && <p className="muted max-w-md">{children}</p>}
       {action && <div className="pt-2">{action}</div>}
     </div>

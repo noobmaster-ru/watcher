@@ -28,8 +28,8 @@ export function LoginPage() {
 
   return (
     <div className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-4">
-      <h1 className="mb-1 text-2xl font-semibold">
-        <span className="text-wb">watcher</span>
+      <h1 className="mb-1 text-3xl">
+        <span className="wordmark">watcher</span>
       </h1>
       <p className="muted mb-6">Отслеживание цен Wildberries</p>
 

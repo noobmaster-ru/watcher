@@ -44,10 +44,10 @@ function TabButton({
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      className={`rounded-lg px-4 py-2 text-sm transition ${
+      className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
         active
-          ? "bg-wb text-white"
-          : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+          ? "bg-gradient-to-r from-wb to-fuchsia-500 text-white shadow-glow"
+          : "border border-slate-200 bg-white text-slate-600 hover:border-wb/40 hover:text-wb dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-wb/60 dark:hover:text-wb-light"
       }`}
     >
       {children}

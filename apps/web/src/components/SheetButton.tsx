@@ -63,7 +63,7 @@ export function SheetButton() {
     <div className="relative shrink-0" ref={box}>
       <button
         onClick={() => setOpen(!open)}
-        className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+        className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-3 py-1.5 text-sm text-slate-600 transition hover:bg-slate-900/5 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white"
         aria-expanded={open}
         aria-haspopup="menu"
       >
@@ -83,7 +83,7 @@ export function SheetButton() {
       {open && (
         <div
           role="menu"
-          className="absolute left-0 top-full z-20 mt-1 w-56 animate-fade-in overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900"
+          className="absolute left-0 top-full z-20 mt-1 w-56 animate-fade-in overflow-hidden rounded-xl border border-slate-200/70 bg-white shadow-card dark:border-slate-700 dark:bg-slate-900"
         >
           <SheetItem
             label="Wildberries"

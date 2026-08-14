@@ -184,8 +184,8 @@ export function ProductPage() {
               <AreaChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                 <defs>
                   <linearGradient id="priceFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#7b32c9" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="#7b32c9" stopOpacity={0} />
+                    <stop offset="0%" stopColor="#7c3aed" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#7c3aed" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 {/* #94a3b8 (slate-400) читается на светлом и тёмном фоне: SVG-атрибуты
@@ -217,7 +217,7 @@ export function ProductPage() {
                 <Area
                   type="stepAfter"
                   dataKey="price"
-                  stroke="#7b32c9"
+                  stroke="#7c3aed"
                   strokeWidth={2}
                   fill="url(#priceFill)"
                   dot={chartData.length < 40}
