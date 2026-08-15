@@ -33,6 +33,29 @@ const LAUNCH_ARGS = [
 const USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+/**
+ * Прокси для Озона (OZON_PROXY). Variti судит по репутации IP: дата-центровым
+ * адресам он может не отдавать даже челлендж — тогда без внешнего IP площадку
+ * не включить. Поддерживаются http://user:pass@host:port и socks5://host:port
+ * (авторизацию в socks5 Chromium не умеет — для неё нужен http-прокси).
+ */
+function proxyFromEnv(): { server: string; username?: string; password?: string } | undefined {
+  const raw = process.env.OZON_PROXY?.trim();
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    const proxy: { server: string; username?: string; password?: string } = {
+      server: `${url.protocol}//${url.host}`,
+    };
+    if (url.username) proxy.username = decodeURIComponent(url.username);
+    if (url.password) proxy.password = decodeURIComponent(url.password);
+    return proxy;
+  } catch {
+    log("OZON_PROXY не разобран, работаю без прокси:", raw);
+    return undefined;
+  }
+}
+
 const log = (...args: unknown[]) => console.error("[browser]", ...args);
 
 let browser: Browser | null = null;
@@ -58,7 +81,12 @@ function resetIdle(): void {
 
 async function launch(): Promise<void> {
   log("запускаю Chromium…");
-  browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  // channel: "chromium" — полный Chrome в новом headless-режиме. По умолчанию
+  // Playwright берёт chrome-headless-shell, а его антиботы распознают заметно
+  // легче: у заглушки «Похоже, нет соединения» именно этот почерк.
+  const proxy = proxyFromEnv();
+  if (proxy) log("иду через прокси", proxy.server);
+  browser = await chromium.launch({ headless: true, channel: "chromium", args: LAUNCH_ARGS, proxy });
   browser.on("disconnected", () => {
     log("браузер отвалился — перезапустится при следующем запросе");
     browser = null;
@@ -85,9 +113,21 @@ async function ensureContext(): Promise<void> {
     log("прохожу антибот-челлендж…");
     await mainPage.goto(HOME, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
     await mainPage.waitForTimeout(CHALLENGE_WAIT_MS);
-    const title = await mainPage.title();
-    if (/antibot|ограничен|доступ/i.test(title)) {
-      throw new Error(`челлендж не пройден (title: ${title})`);
+
+    // Заглушки Озона: и явный отказ, и «Похоже, нет соединения» — это страница,
+    // которую он показывает непрошедшим проверку. Повторный заход часто
+    // добивает челлендж: кука уже стоит, второй визит выглядит обычным.
+    const BLOCKED = /antibot|ограничен|доступ|нет соединения|что-то пошло не так/i;
+    let title = await mainPage.title();
+    for (let attempt = 0; BLOCKED.test(title) && attempt < 2; attempt++) {
+      log(`заглушка «${title.slice(0, 40)}» — повторный заход ${attempt + 1}`);
+      await mainPage.waitForTimeout(5_000);
+      await mainPage.goto(HOME, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
+      await mainPage.waitForTimeout(CHALLENGE_WAIT_MS);
+      title = await mainPage.title();
+    }
+    if (BLOCKED.test(title)) {
+      throw new Error(`челлендж не пройден (title: ${title.slice(0, 60)})`);
     }
     challenged = true;
     log("челлендж пройден:", title.slice(0, 40));
