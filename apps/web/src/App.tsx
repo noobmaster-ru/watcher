@@ -16,6 +16,7 @@ const AlertsPage = lazy(() => import("./pages/Alerts").then((m) => ({ default: m
 const SettingsPage = lazy(() => import("./pages/Settings").then((m) => ({ default: m.SettingsPage })));
 const KeywordsPage = lazy(() => import("./pages/Keywords").then((m) => ({ default: m.KeywordsPage })));
 const MarketPage = lazy(() => import("./pages/Market").then((m) => ({ default: m.MarketPage })));
+const OzonPage = lazy(() => import("./pages/Ozon").then((m) => ({ default: m.OzonPage })));
 
 export function App() {
   const me = useQuery({
@@ -54,6 +55,7 @@ export function App() {
             <Route path="/product/:nm" element={<ProductPage />} />
             <Route path="/seller/:id" element={<SellerPage />} />
             <Route path="/market" element={<MarketPage />} />
+          <Route path="/ozon" element={<OzonPage />} />
             <Route path="/keywords" element={<KeywordsPage />} />
             <Route path="/alerts" element={<AlertsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
@@ -108,6 +110,7 @@ function Header({ email }: { email: string }) {
           <Tab to="/">Отслеживание</Tab>
           <Tab to="/add">Добавить</Tab>
           <Tab to="/market">Яндекс Маркет</Tab>
+          <Tab to="/ozon">Озон</Tab>
           <Tab to="/keywords">Ключевые слова</Tab>
           <Tab to="/alerts">
             События

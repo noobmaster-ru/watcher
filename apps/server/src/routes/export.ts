@@ -6,6 +6,7 @@ import { requireAuth } from "../auth.js";
 import { z } from "zod";
 import { SheetNotLinkedError, exportUser, linkSpreadsheet } from "../services/export.js";
 import { exportYm } from "../services/ym-export.js";
+import { exportOzon } from "../services/ozon-export.js";
 import { GoogleError, type GoogleApi } from "../services/google.js";
 
 const notConfigured =
@@ -34,6 +35,7 @@ export async function exportRoutes(app: FastifyInstance, google: GoogleApi | nul
       serviceAccountEmail: google?.email ?? null,
       wb: byMarketplace("wb"),
       ym: byMarketplace("ym"),
+      ozon: byMarketplace("ozon"),
       // прежние поля — чтобы не ломать уже открытые вкладки со старым интерфейсом
       ...byMarketplace("wb"),
     });
@@ -46,7 +48,7 @@ export async function exportRoutes(app: FastifyInstance, google: GoogleApi | nul
     const parsed = z
       .object({
         url: z.string().min(10).max(500),
-        marketplace: z.enum(["wb", "ym"]).default("wb"),
+        marketplace: z.enum(["wb", "ym", "ozon"]).default("wb"),
       })
       .safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "Вставьте ссылку на Гугл-таблицу" });
@@ -73,14 +75,16 @@ export async function exportRoutes(app: FastifyInstance, google: GoogleApi | nul
    */
   app.post("/api/sheet/export", async (request, reply) => {
     if (!google) return reply.code(400).send({ error: notConfigured });
-    const body = z.object({ marketplace: z.enum(["wb", "ym"]).default("wb") }).safeParse(request.body ?? {});
+    const body = z.object({ marketplace: z.enum(["wb", "ym", "ozon"]).default("wb") }).safeParse(request.body ?? {});
     if (!body.success) return reply.code(400).send({ error: "Некорректная площадка" });
 
     try {
       const result =
         body.data.marketplace === "ym"
           ? await exportYm(google, request.user!.id)
-          : await exportUser(google, request.user!.id);
+          : body.data.marketplace === "ozon"
+            ? await exportOzon(google, request.user!.id)
+            : await exportUser(google, request.user!.id);
       return reply.send(result);
     } catch (error) {
       if (error instanceof SheetNotLinkedError) {

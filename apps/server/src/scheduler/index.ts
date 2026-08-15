@@ -5,12 +5,15 @@
 
 import type { WbClient } from "@watcher/wb-core";
 import type { YmClient } from "@watcher/ym-core";
+import type { OzonClient } from "@watcher/ozon-core";
 import { config } from "../config.js";
 import { purgeExpiredSessions } from "../auth.js";
 import { runPriceTick } from "./prices.js";
 import { runSellerTick } from "./sellers.js";
 import { runKeywordTick } from "./keywords.js";
 import { runYmTick } from "./ym.js";
+import { runOzonTick } from "./ozon.js";
+import { exportOzon, ozonUsersToExport } from "../services/ozon-export.js";
 import { exportYm, ymUsersToExport } from "../services/ym-export.js";
 import { exportUser, usersToExport } from "../services/export.js";
 import type { GoogleApi } from "../services/google.js";
@@ -27,6 +30,7 @@ export class Scheduler {
     private readonly wb: WbClient,
     private readonly google: GoogleApi | null = null,
     private readonly ym: YmClient | null = null,
+    private readonly ozon: OzonClient | null = null,
   ) {}
 
   start(): void {
@@ -63,6 +67,19 @@ export class Scheduler {
       });
     }
 
+    // Озон: каждый запрос — браузер в контейнере агента, тик раз в 2 минуты
+    // хватает с запасом при часовом интервале товаров.
+    if (this.ozon) {
+      this.every(2 * 60_000, "озон", async () => {
+        const result = await runOzonTick(this.ozon as OzonClient);
+        if (result.checked > 0 || result.events > 0) {
+          log(`озон: проверено ${result.checked}, событий ${result.events}, пропало ${result.missing}`);
+        }
+      });
+    } else {
+      log("Озон выключен: не задан OZON_AGENT_URL");
+    }
+
     // Позиции — по одному запросу за раз: search.wb.ru лимитирует жёстче всех,
     // и жадный обход стоил бы блокировки поиска целиком, включая интерфейс.
     this.every(3 * 60_000, "позиции", async () => {
@@ -79,6 +96,14 @@ export class Scheduler {
             if (total > 0) log(`выгрузка Wildberries, пользователь ${userId}: строк ${total}`);
           } catch (error) {
             log(`выгрузка Wildberries, пользователь ${userId}: ${(error as Error).message}`);
+          }
+        }
+        for (const userId of await ozonUsersToExport()) {
+          try {
+            const result = await exportOzon(this.google as GoogleApi, userId);
+            if (result.products > 0) log(`выгрузка Озона, пользователь ${userId}: строк ${result.products}`);
+          } catch (error) {
+            log(`выгрузка Озона, пользователь ${userId}: ${(error as Error).message}`);
           }
         }
         // Таблица Маркета своя, и подключают её отдельно: пользователь мог

@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import cookie from "@fastify/cookie";
 import { WbClient } from "@watcher/wb-core";
 import { YmClient } from "@watcher/ym-core";
+import { OzonClient } from "@watcher/ozon-core";
 import { GoogleSheetsApi, loadServiceAccount, type GoogleApi } from "./services/google.js";
 import { config } from "./config.js";
 import { loadUser } from "./auth.js";
@@ -13,12 +14,15 @@ import { alertRoutes } from "./routes/alerts.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { keywordRoutes } from "./routes/keywords.js";
 import { ymRoutes } from "./routes/ym.js";
+import { ozonRoutes } from "./routes/ozon.js";
 import { exportRoutes } from "./routes/export.js";
 
 export interface App {
   server: FastifyInstance;
   wb: WbClient;
   ym: YmClient;
+  /** null, когда агент не настроен: площадка выключена. */
+  ozon: OzonClient | null;
   /** null, когда ключ сервисного аккаунта не задан: выгрузка просто выключена. */
   google: GoogleApi | null;
 }
@@ -30,6 +34,8 @@ export interface BuildOptions {
   google?: GoogleApi | null;
   /** Готовый клиент Яндекс Маркета. */
   ym?: YmClient;
+  /** Готовый клиент Озона. */
+  ozon?: OzonClient | null;
 }
 
 export async function buildApp(options: BuildOptions = {}): Promise<App> {
@@ -70,6 +76,13 @@ export async function buildApp(options: BuildOptions = {}): Promise<App> {
     options.ym ??
     new YmClient({ proxy: config.wb.proxy, log: (...args: unknown[]) => server.log.debug({ ym: args }) });
 
+  const ozon =
+    options.ozon !== undefined
+      ? options.ozon
+      : config.ozonAgentUrl
+        ? new OzonClient(config.ozonAgentUrl)
+        : null;
+
   const account = loadServiceAccount(config.google.serviceAccount);
   const google = options.google !== undefined ? options.google : account ? new GoogleSheetsApi(account) : null;
 
@@ -85,6 +98,7 @@ export async function buildApp(options: BuildOptions = {}): Promise<App> {
   await server.register(alertRoutes);
   await server.register(async (instance) => keywordRoutes(instance, wb));
   await server.register(async (instance) => ymRoutes(instance, ym));
+  await server.register(async (instance) => ozonRoutes(instance, ozon));
   await server.register(async (instance) => exportRoutes(instance, google));
   await server.register(settingsRoutes);
 
@@ -94,5 +108,5 @@ export async function buildApp(options: BuildOptions = {}): Promise<App> {
     return reply.code(404).send({ error: "Not found" });
   });
 
-  return { server, wb, ym, google };
+  return { server, wb, ym, ozon, google };
 }

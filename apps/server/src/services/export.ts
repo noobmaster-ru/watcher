@@ -99,7 +99,7 @@ export async function linkSpreadsheet(
 
   // Читаем таблицу: это одновременно и проверка, что доступ действительно выдан.
   const meta = await api.describe(spreadsheetId);
-  const sheets = marketplace === "ym" ? YM_SHEETS : SHEETS;
+  const sheets = marketplace === "wb" ? SHEETS : YM_SHEETS; // у ym и ozon один служебный лист «Товары»
   await api.ensureSheets(spreadsheetId, sheets);
 
   // Заголовки проставляем только в пустые листы, чтобы не портить чужую разметку.
@@ -140,7 +140,7 @@ export async function ensureSpreadsheet(
     .limit(1);
   if (!existing) throw new SheetNotLinkedError(api.email);
 
-  await api.ensureSheets(existing.spreadsheetId, marketplace === "ym" ? YM_SHEETS : SHEETS);
+  await api.ensureSheets(existing.spreadsheetId, marketplace === "wb" ? SHEETS : YM_SHEETS);
   return { spreadsheetId: existing.spreadsheetId, spreadsheetUrl: existing.spreadsheetUrl };
 }
 

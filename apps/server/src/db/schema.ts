@@ -299,6 +299,79 @@ export const ymWatches = pgTable(
   }),
 );
 
+// ── Озон ──────────────────────────────────────────────────────────────────────
+// Зеркало таблиц Яндекс Маркета: тот же принцип «отдельные таблицы на площадку»,
+// та же форма истории. Отличие одно — цена с Ozon Картой хранится рядом с
+// обычной: их разница и есть главный вопрос покупателя на Озоне.
+
+export const ozonProducts = pgTable(
+  "ozon_products",
+  {
+    sku: text("sku").primaryKey(),
+    name: text("name"),
+    image: text("image"),
+    url: text("url"),
+
+    lastPrice: integer("last_price"),
+    lastCardPrice: integer("last_card_price"),
+    lastInStock: boolean("last_in_stock"),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    lastPointAt: timestamp("last_point_at", { withTimezone: true }),
+
+    isTracked: boolean("is_tracked").notNull().default(false),
+    checkIntervalMin: integer("check_interval_min").notNull().default(60),
+    nextCheckAt: timestamp("next_check_at", { withTimezone: true }).notNull().defaultNow(),
+    errorCount: integer("error_count").notNull().default(0),
+    createdAt: now(),
+  },
+  (t) => ({
+    scheduleIdx: index("ozon_products_schedule_idx").on(t.nextCheckAt).where(sql`${t.isTracked}`),
+  }),
+);
+
+export const ozonPricePoints = pgTable(
+  "ozon_price_points",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    sku: text("sku")
+      .notNull()
+      .references(() => ozonProducts.sku, { onDelete: "cascade" }),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+    price: integer("price"),
+    cardPrice: integer("card_price"),
+    inStock: boolean("in_stock").notNull(),
+  },
+  (t) => ({
+    historyIdx: index("ozon_price_points_sku_checked_idx").on(t.sku, t.checkedAt),
+  }),
+);
+
+export const ozonWatches = pgTable(
+  "ozon_watches",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sku: text("sku")
+      .notNull()
+      .references(() => ozonProducts.sku, { onDelete: "cascade" }),
+    title: text("title"),
+    intervalMin: integer("interval_min").notNull().default(60),
+    minChangePct: integer("min_change_pct").notNull().default(1),
+    minChangeAbs: integer("min_change_abs").notNull().default(0),
+    onDrop: boolean("on_drop").notNull().default(true),
+    onRise: boolean("on_rise").notNull().default(false),
+    onStockChange: boolean("on_stock_change").notNull().default(true),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: now(),
+  },
+  (t) => ({
+    userIdx: index("ozon_watches_user_idx").on(t.userId),
+    uniquePerUser: uniqueIndex("ozon_watches_user_sku_idx").on(t.userId, t.sku),
+  }),
+);
+
 // ── выгрузка в Google Таблицы ────────────────────────────────────────────────
 /**
  * Таблица пользователя. Курсоры хранят, до какой строки данные уже выгружены:
@@ -328,7 +401,7 @@ export const watchKinds = ["product", "seller"] as const;
 export type WatchKind = (typeof watchKinds)[number];
 
 /** Площадка, с которой снимаются цены. */
-export const marketplaces = ["wb", "ym"] as const;
+export const marketplaces = ["wb", "ym", "ozon"] as const;
 export type Marketplace = (typeof marketplaces)[number];
 
 export const watches = pgTable(
@@ -390,6 +463,8 @@ export const alerts = pgTable(
     watchId: integer("watch_id").references(() => watches.id, { onDelete: "cascade" }),
     /** Подписка Маркета; заполнена вместо watch_id у событий Яндекса. */
     ymWatchId: integer("ym_watch_id").references(() => ymWatches.id, { onDelete: "cascade" }),
+    /** Подписка Озона; заполнена у событий этой площадки. */
+    ozonWatchId: integer("ozon_watch_id").references(() => ozonWatches.id, { onDelete: "cascade" }),
     /** Площадка события: лента в интерфейсе общая на обе. */
     marketplace: text("marketplace").notNull().default("wb").$type<Marketplace>(),
     /** Артикул Wildberries либо sku Маркета — оба числовые. */

@@ -62,6 +62,9 @@ export const config = {
   },
 
 
+  /** Адрес агента Озона в docker-сети. Пусто — площадка выключена. */
+  ozonAgentUrl: process.env.OZON_AGENT_URL?.trim() || undefined,
+
   google: {
     /** JSON сервисного аккаунта целиком либо путь к файлу с ним. */
     serviceAccount: process.env.GOOGLE_SERVICE_ACCOUNT?.trim() || undefined,

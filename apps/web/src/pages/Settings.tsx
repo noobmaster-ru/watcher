@@ -120,6 +120,7 @@ function GoogleSheet() {
 
       <MarketplaceSheet marketplace="wb" label="Wildberries" side={sheet.data?.wb} />
       <MarketplaceSheet marketplace="ym" label="Яндекс Маркет" side={sheet.data?.ym} />
+      <MarketplaceSheet marketplace="ozon" label="Озон" side={sheet.data?.ozon} />
     </section>
   );
 }
@@ -130,7 +131,7 @@ function MarketplaceSheet({
   label,
   side,
 }: {
-  marketplace: "wb" | "ym";
+  marketplace: "wb" | "ym" | "ozon";
   label: string;
   side: SheetSide | undefined;
 }) {

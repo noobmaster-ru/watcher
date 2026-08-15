@@ -97,6 +97,12 @@ export function SheetButton() {
             connected={connected(sheet.data?.ym)}
             onClick={() => openSide(sheet.data?.ym)}
           />
+          <SheetItem
+            label="Озон"
+            side={sheet.data?.ozon}
+            connected={connected(sheet.data?.ozon)}
+            onClick={() => openSide(sheet.data?.ozon)}
+          />
         </div>
       )}
     </div>

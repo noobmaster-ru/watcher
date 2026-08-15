@@ -155,6 +155,7 @@ export interface SheetState {
   serviceAccountEmail: string | null;
   wb: SheetSide;
   ym: SheetSide;
+  ozon: SheetSide;
 }
 
 export interface KeywordPosition {
