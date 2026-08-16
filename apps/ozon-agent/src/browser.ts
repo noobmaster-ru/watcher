@@ -30,8 +30,12 @@ const LAUNCH_ARGS = [
   "--disable-extensions",
   "--disable-background-networking",
 ];
-const USER_AGENT =
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+// Заголовок не задаём вручную: строка вроде «Chrome/120 на Linux» расходится с
+// настоящим отпечатком браузера в образе (версия движка, платформа, client
+// hints), и именно по такому расхождению антибот отличает автоматизацию.
+// Playwright подставит собственный UA, согласованный со всем остальным; в нём
+// только заменяем слово «Headless», которое выдаёт режим без окна.
+const HEADLESS_MARK = /Headless/g;
 
 /**
  * Прокси для Озона (OZON_PROXY). Variti судит по репутации IP: дата-центровым
@@ -95,10 +99,23 @@ async function launch(): Promise<void> {
     challenged = false;
   });
 
+  // Настоящий UA этого Chromium — из него уходит только пометка Headless.
+  const probe = await browser.newContext();
+  const nativeUa = await (await probe.newPage()).evaluate(() => navigator.userAgent);
+  await probe.close();
+
   context = await browser.newContext({
     viewport: { width: 1920, height: 1080 },
-    userAgent: USER_AGENT,
+    userAgent: nativeUa.replace(HEADLESS_MARK, ""),
     locale: "ru-RU",
+    timezoneId: "Europe/Moscow",
+  });
+
+  // navigator.webdriver = true — самый прямой признак автоматизации: флаг
+  // --disable-blink-features=AutomationControlled убирает его не во всех
+  // сборках, поэтому дублируем скриптом до загрузки любой страницы.
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
   });
   challenged = false;
 }
