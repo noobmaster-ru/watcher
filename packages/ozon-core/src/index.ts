@@ -37,7 +37,7 @@ export class OzonNeedsHumanError extends Error {
   }
 }
 
-export type OzonSessionState = "down" | "needs_human" | "ready";
+export type OzonSessionState = "down" | "needs_human" | "ready" | "network_error";
 
 export interface OzonAgentStatus {
   running: boolean;

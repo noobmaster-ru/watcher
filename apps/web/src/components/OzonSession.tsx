@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { ErrorBox } from "./ui";
 
-type SessionState = "down" | "needs_human" | "ready";
+type SessionState = "down" | "needs_human" | "ready" | "network_error";
 
 interface Session {
   available: boolean;
@@ -53,6 +53,11 @@ export function OzonSession() {
       dot: "bg-slate-400",
       label: "Браузер агента ещё не запускался",
       hint: "Первый запрос к Озону поднимет его. Если Озон покажет капчу — появится кнопка.",
+    },
+    network_error: {
+      dot: "bg-red-500",
+      label: "Браузер не дотянулся до Озона",
+      hint: "Сеть или прокси не отвечают: если задан OZON_PROXY, он мог протухнуть. Проверьте прокси и нажмите «Проверить снова».",
     },
   };
   const view = styles[state];

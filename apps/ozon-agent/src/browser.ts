@@ -68,7 +68,7 @@ let context: BrowserContext | null = null;
 let mainPage: Page | null = null;
 let launching: Promise<void> | null = null;
 
-export type SessionState = "down" | "needs_human" | "ready";
+export type SessionState = "down" | "needs_human" | "ready" | "network_error";
 let sessionState: SessionState = "down";
 let lastTitle = "";
 let lastCheckAt: Date | null = null;
@@ -138,14 +138,20 @@ async function launch(): Promise<void> {
 export async function checkSession(): Promise<SessionState> {
   await launch();
   const page = mainPage as Page;
+  lastCheckAt = new Date();
   try {
     await page.goto(HOME, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
     await page.waitForTimeout(SETTLE_MS);
     lastTitle = await page.title();
   } catch (error) {
-    lastTitle = `ошибка: ${(error as Error).message.slice(0, 80)}`;
+    // Сеть не дошла до Озона (прокси мёртв, DNS, таймаут). Это не «сессия
+    // жива» и не «нужен человек» — это отдельное состояние, иначе агент бы
+    // радостно рапортовал о живой сессии, ни разу не увидев Озон.
+    lastTitle = `сеть: ${((error as Error).message.split("\n")[0] ?? "").slice(0, 90)}`;
+    sessionState = "network_error";
+    log("сеть недоступна:", lastTitle);
+    return sessionState;
   }
-  lastCheckAt = new Date();
   sessionState = BLOCKED.test(lastTitle) || !lastTitle ? "needs_human" : "ready";
   log(sessionState === "ready" ? "сессия жива:" : "нужен человек:", lastTitle.slice(0, 50));
   return sessionState;
