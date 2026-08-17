@@ -9,6 +9,20 @@
 		reverse_proxy app:3000
 	}
 
+	# Окно браузера агента Озона (noVNC). Это WebSocket до контейнера агента,
+	# и пускать в него можно только вошедших пользователей: у кого сессия
+	# watcher, тот и может пройти капчу за агента. Проверку делает приложение
+	# через forward_auth — Caddy спрашивает /api/ozon/vnc-auth и по ответу 2xx
+	# пропускает, иначе отдаёт 401. Наружу порт агента при этом не торчит.
+	handle /ozon-browser/* {
+		forward_auth app:3000 {
+			uri /api/ozon/vnc-auth
+			copy_headers Cookie
+		}
+		uri strip_prefix /ozon-browser
+		reverse_proxy ozon-agent:6080
+	}
+
 	# всё остальное — статика SPA; неизвестные пути отдают index.html,
 	# иначе перезагрузка страницы вида /product/242678284 даст 404
 	handle {

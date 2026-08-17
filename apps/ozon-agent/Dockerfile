@@ -27,6 +27,12 @@ FROM mcr.microsoft.com/playwright:v1.49.0-jammy
 WORKDIR /app
 ENV NODE_ENV=production
 
+# Виртуальный экран и доступ к нему: Chrome с окном вместо headless, чтобы
+# антибот видел настоящий браузер, и noVNC, чтобы человек мог пройти капчу.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends xvfb x11vnc x11-utils novnc websockify \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY package.json package-lock.json ./
 COPY packages/wb-core/package.json packages/wb-core/
 COPY packages/ym-core/package.json packages/ym-core/
@@ -38,6 +44,12 @@ COPY apps/ozon-agent/package.json apps/ozon-agent/
 RUN npm ci --omit=dev --workspace @watcher/ozon-agent && npm cache clean --force
 
 COPY --from=builder /app/apps/ozon-agent/dist apps/ozon-agent/dist
+COPY apps/ozon-agent/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-EXPOSE 8100
-CMD ["node", "apps/ozon-agent/dist/index.js"]
+# Профиль браузера живёт на томе: в нём куки антибота, и переживать он должен
+# и перезапуск контейнера, и пересборку образа.
+VOLUME ["/data/ozon-profile"]
+
+EXPOSE 8100 6080
+ENTRYPOINT ["/entrypoint.sh"]

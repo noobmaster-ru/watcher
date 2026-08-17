@@ -66,12 +66,18 @@ services:
       context: .
       dockerfile: apps/ozon-agent/Dockerfile
     restart: unless-stopped
-    mem_limit: 700m
+    # Chrome с окном тяжелее headless: сам браузер плюс Xvfb и VNC.
+    mem_limit: 1200m
+    shm_size: 512m
     environment:
       PORT: 8100
-      # Российский прокси для Озона. Variti судит по репутации IP, и
-      # дата-центровому адресу может не отдавать даже челлендж.
+      # Российский прокси для Озона. Профиль и прокси неразлучны: кука
+      # антибота выдана на связку «браузер + IP», смена прокси обнуляет сессию.
       OZON_PROXY: ${OZON_PROXY:-}
+      OZON_PROFILE_DIR: /data/ozon-profile
+    volumes:
+      # Профиль с куками антибота — самое ценное в этом контейнере
+      - ozon_profile:/data/ozon-profile
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8100/health > /dev/null || exit 1"]
       interval: 60s
@@ -98,5 +104,6 @@ services:
 
 volumes:
   pgdata:
+  ozon_profile:
   caddy_data:
   caddy_config:

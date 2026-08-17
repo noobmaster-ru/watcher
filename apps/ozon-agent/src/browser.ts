@@ -1,47 +1,51 @@
-// Один долгоживущий headless Chromium, который проходит антибот-челлендж Озона
-// (Variti) один раз и дальше дёргает composer-api изнутри открытой страницы —
-// как расширение в живой вкладке. Порт browser.js из ozon-mcp-server.
+// Один настоящий Chrome с постоянным профилем, который живёт на сервере как
+// обычный браузер человека. Ровно так устроен рабочий парсинг Озона у
+// конкурентов: сессия, однажды прошедшая антибот руками, дальше отдаёт
+// карточки неделями, а воркер дёргает composer-api изнутри открытой вкладки.
 //
-// Ключевые решения оттуда, проверенные автором форка:
-//  - главная страница остаётся открытой: все fetch идут из неё и наследуют
-//    куки и origin пройденного челленджа;
-//  - стили и картинки НЕ блокируются — челлендж грузит свои скрипты через них,
-//    и обрыв этих запросов приводит к вечному 403;
-//  - по простою браузер закрывается целиком, чтобы вернуть память: на сервере
-//    её мало, а перезапуск с повторным челленджем стоит ~15 секунд раз в час.
+// Что здесь принципиально и почему:
+//  - НЕ headless: антибот Озона режет безголовые сборки по отпечатку. Chrome
+//    рисует окно в виртуальный экран Xvfb, а через noVNC в это окно можно
+//    зайти глазами и пройти капчу — один раз, а не на каждом запуске;
+//  - ПОСТОЯННЫЙ ПРОФИЛЬ (userDataDir на диске): куки антибота привязаны к
+//    устройству, и переносить их нельзя — но если профиль тот же, IP тот же и
+//    браузер тот же, Озон видит того же «человека»;
+//  - челлендж НЕ проходится автоматически: если сессия протухла, агент честно
+//    отвечает «нужен человек» и ждёт, а не долбится в стену, продлевая штраф;
+//  - стили и картинки не блокируются: челлендж грузит свои скрипты через них,
+//    и обрыв этих запросов приводит к вечному 403.
 
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { chromium, type BrowserContext, type Page } from "playwright";
 
 const HOME = "https://www.ozon.ru/";
 const API = "https://www.ozon.ru/api/composer-api.bx/page/json/v2?url=";
-const CHALLENGE_WAIT_MS = 12_000;
-const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+const PROFILE_DIR = process.env.OZON_PROFILE_DIR ?? "/data/ozon-profile";
 const NAV_TIMEOUT_MS = 90_000;
+/** Сколько ждать после перехода, чтобы понять, отдал ли Озон страницу. */
+const SETTLE_MS = 6_000;
 
 const LAUNCH_ARGS = [
   "--disable-blink-features=AutomationControlled",
   "--no-sandbox",
   "--disable-setuid-sandbox",
   "--disable-dev-shm-usage",
-  "--disable-gpu",
   "--mute-audio",
   "--no-first-run",
   "--no-default-browser-check",
-  "--disable-extensions",
   "--disable-background-networking",
+  "--window-size=1366,900",
+  "--window-position=0,0",
 ];
-// Заголовок не задаём вручную: строка вроде «Chrome/120 на Linux» расходится с
-// настоящим отпечатком браузера в образе (версия движка, платформа, client
-// hints), и именно по такому расхождению антибот отличает автоматизацию.
-// Playwright подставит собственный UA, согласованный со всем остальным; в нём
-// только заменяем слово «Headless», которое выдаёт режим без окна.
-const HEADLESS_MARK = /Headless/g;
+
+const log = (...args: unknown[]) => console.error("[browser]", ...args);
+
+/** Заглушки Озона: то, что он показывает непрошедшим проверку. */
+const BLOCKED = /antibot|captcha|ограничен|нет соединения|что-то пошло не так/i;
 
 /**
- * Прокси для Озона (OZON_PROXY). Variti судит по репутации IP: дата-центровым
- * адресам он может не отдавать даже челлендж — тогда без внешнего IP площадку
- * не включить. Поддерживаются http://user:pass@host:port и socks5://host:port
- * (авторизацию в socks5 Chromium не умеет — для неё нужен http-прокси).
+ * Прокси для Озона (OZON_PROXY). Профиль и прокси должны быть неразлучны:
+ * кука антибота выдана на связку «браузер + IP», и смена прокси обнуляет
+ * сессию так же, как смена профиля.
  */
 function proxyFromEnv(): { server: string; username?: string; password?: string } | undefined {
   const raw = process.env.OZON_PROXY?.trim();
@@ -60,100 +64,97 @@ function proxyFromEnv(): { server: string; username?: string; password?: string 
   }
 }
 
-const log = (...args: unknown[]) => console.error("[browser]", ...args);
-
-let browser: Browser | null = null;
 let context: BrowserContext | null = null;
 let mainPage: Page | null = null;
-let initPromise: Promise<void> | null = null;
-let challenged = false;
-let idleTimer: NodeJS.Timeout | null = null;
+let launching: Promise<void> | null = null;
 
-/** Когда браузер запускался и прошёл ли челлендж — для /health. */
-export function browserStatus(): { running: boolean; challenged: boolean } {
-  return { running: browser?.isConnected() ?? false, challenged };
+export type SessionState = "down" | "needs_human" | "ready";
+let sessionState: SessionState = "down";
+let lastTitle = "";
+let lastCheckAt: Date | null = null;
+
+/** Состояние сессии — для /health и для сообщения в интерфейсе. */
+export function browserStatus(): {
+  running: boolean;
+  session: SessionState;
+  lastTitle: string;
+  lastCheckAt: string | null;
+  profileDir: string;
+} {
+  return {
+    running: Boolean(context),
+    session: sessionState,
+    lastTitle,
+    lastCheckAt: lastCheckAt?.toISOString() ?? null,
+    profileDir: PROFILE_DIR,
+  };
 }
 
-function resetIdle(): void {
-  if (idleTimer) clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => {
-    log("простой — закрываю браузер, чтобы вернуть память");
-    void shutdown();
-  }, IDLE_TIMEOUT_MS);
-  idleTimer.unref();
-}
-
+/** Поднимает Chrome с постоянным профилем. Идемпотентно. */
 async function launch(): Promise<void> {
-  log("запускаю Chromium…");
-  // channel: "chromium" — полный Chrome в новом headless-режиме. По умолчанию
-  // Playwright берёт chrome-headless-shell, а его антиботы распознают заметно
-  // легче: у заглушки «Похоже, нет соединения» именно этот почерк.
-  const proxy = proxyFromEnv();
-  if (proxy) log("иду через прокси", proxy.server);
-  browser = await chromium.launch({ headless: true, channel: "chromium", args: LAUNCH_ARGS, proxy });
-  browser.on("disconnected", () => {
-    log("браузер отвалился — перезапустится при следующем запросе");
-    browser = null;
-    context = null;
-    mainPage = null;
-    challenged = false;
-  });
+  if (context) return;
+  if (launching) return launching;
 
-  // Настоящий UA этого Chromium — из него уходит только пометка Headless.
-  const probe = await browser.newContext();
-  const nativeUa = await (await probe.newPage()).evaluate(() => navigator.userAgent);
-  await probe.close();
+  launching = (async () => {
+    const proxy = proxyFromEnv();
+    log("запускаю Chrome с профилем", PROFILE_DIR, proxy ? `через прокси ${proxy.server}` : "без прокси");
+    // channel не задаём: в образе Playwright лежит полный Chromium, headless:false
+    // рисует его в DISPLAY (Xvfb), который поднимает entrypoint.
+    context = await chromium.launchPersistentContext(PROFILE_DIR, {
+      headless: false,
+      args: LAUNCH_ARGS,
+      proxy,
+      viewport: null, // окно задаёт размер само — как у настоящего пользователя
+      locale: "ru-RU",
+      timezoneId: "Europe/Moscow",
+      ignoreDefaultArgs: ["--enable-automation"],
+    });
+    context.on("close", () => {
+      log("браузер закрылся");
+      context = null;
+      mainPage = null;
+      sessionState = "down";
+    });
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    });
 
-  context = await browser.newContext({
-    viewport: { width: 1920, height: 1080 },
-    userAgent: nativeUa.replace(HEADLESS_MARK, ""),
-    locale: "ru-RU",
-    timezoneId: "Europe/Moscow",
-  });
-
-  // navigator.webdriver = true — самый прямой признак автоматизации: флаг
-  // --disable-blink-features=AutomationControlled убирает его не во всех
-  // сборках, поэтому дублируем скриптом до загрузки любой страницы.
-  await context.addInitScript(() => {
-    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-  });
-  challenged = false;
-}
-
-async function ensureContext(): Promise<void> {
-  if (context && challenged) return;
-  if (initPromise) return initPromise;
-
-  initPromise = (async () => {
-    if (!browser?.isConnected()) await launch();
-    mainPage = await (context as BrowserContext).newPage();
-    log("прохожу антибот-челлендж…");
-    await mainPage.goto(HOME, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
-    await mainPage.waitForTimeout(CHALLENGE_WAIT_MS);
-
-    // Заглушки Озона: и явный отказ, и «Похоже, нет соединения» — это страница,
-    // которую он показывает непрошедшим проверку. Повторный заход часто
-    // добивает челлендж: кука уже стоит, второй визит выглядит обычным.
-    const BLOCKED = /antibot|ограничен|доступ|нет соединения|что-то пошло не так/i;
-    let title = await mainPage.title();
-    for (let attempt = 0; BLOCKED.test(title) && attempt < 2; attempt++) {
-      log(`заглушка «${title.slice(0, 40)}» — повторный заход ${attempt + 1}`);
-      await mainPage.waitForTimeout(5_000);
-      await mainPage.goto(HOME, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
-      await mainPage.waitForTimeout(CHALLENGE_WAIT_MS);
-      title = await mainPage.title();
-    }
-    if (BLOCKED.test(title)) {
-      throw new Error(`челлендж не пройден (title: ${title.slice(0, 60)})`);
-    }
-    challenged = true;
-    log("челлендж пройден:", title.slice(0, 40));
+    // Одна вкладка на всё: та же, в которую человек заходит через noVNC.
+    mainPage = context.pages()[0] ?? (await context.newPage());
+    sessionState = "down";
   })();
 
   try {
-    await initPromise;
+    await launching;
   } finally {
-    initPromise = null;
+    launching = null;
+  }
+}
+
+/**
+ * Проверяет, жива ли сессия: открывает главную и смотрит заголовок. Никаких
+ * повторных заходов — если стена, значит нужен человек, и об этом сообщается.
+ */
+export async function checkSession(): Promise<SessionState> {
+  await launch();
+  const page = mainPage as Page;
+  try {
+    await page.goto(HOME, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
+    await page.waitForTimeout(SETTLE_MS);
+    lastTitle = await page.title();
+  } catch (error) {
+    lastTitle = `ошибка: ${(error as Error).message.slice(0, 80)}`;
+  }
+  lastCheckAt = new Date();
+  sessionState = BLOCKED.test(lastTitle) || !lastTitle ? "needs_human" : "ready";
+  log(sessionState === "ready" ? "сессия жива:" : "нужен человек:", lastTitle.slice(0, 50));
+  return sessionState;
+}
+
+export class NeedsHumanError extends Error {
+  constructor(title: string) {
+    super(`Озон требует проверку человеком (${title.slice(0, 40)}). Откройте окно браузера агента и пройдите её.`);
+    this.name = "NeedsHumanError";
   }
 }
 
@@ -161,51 +162,58 @@ const DEAD = /Target page, context or browser has been closed|Session closed|Con
 
 /**
  * composer-api для пути сайта (например «/product/123/»). fetch выполняется из
- * прошедшей челлендж страницы; чистый fetch без навигации безопасен даже
- * параллельно. На 403/307 (протухла сессия) — перезапуск с новым челленджем.
+ * открытой вкладки и наследует куки живой сессии. Если сессия впервые не
+ * проверялась — проверяем; если Озон отвечает стеной — не ретраим, а честно
+ * поднимаем NeedsHumanError.
  */
-export async function fetchComposer(path: string, retries = 1): Promise<unknown> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      resetIdle();
-      await ensureContext();
-      const body = await (mainPage as Page).evaluate(async (url: string) => {
-        const response = await fetch(url, { headers: { accept: "application/json" } });
-        return { status: response.status, text: await response.text() };
-      }, API + encodeURIComponent(path));
+export async function fetchComposer(path: string): Promise<unknown> {
+  await launch();
+  if (sessionState !== "ready") {
+    const state = await checkSession();
+    if (state !== "ready") throw new NeedsHumanError(lastTitle);
+  }
 
-      if (body.status !== 200) {
-        if ((body.status === 403 || body.status === 307) && attempt < retries) {
-          await shutdown();
-          continue;
-        }
-        throw new Error(`Озон ответил HTTP ${body.status}`);
-      }
-      return JSON.parse(body.text);
-    } catch (error) {
-      if (DEAD.test(String((error as Error).message)) && attempt < retries) {
-        await shutdown();
-        continue;
-      }
-      throw error;
+  try {
+    const body = await (mainPage as Page).evaluate(async (url: string) => {
+      const response = await fetch(url, { headers: { accept: "application/json" }, credentials: "include" });
+      return { status: response.status, text: await response.text() };
+    }, API + encodeURIComponent(path));
+
+    if (body.status === 403 || body.status === 307) {
+      // сессия протухла между проверками — переводим в «нужен человек», без ретраев
+      sessionState = "needs_human";
+      lastTitle = `HTTP ${body.status} на composer-api`;
+      throw new NeedsHumanError(lastTitle);
     }
+    if (body.status !== 200) throw new Error(`Озон ответил HTTP ${body.status}`);
+    return JSON.parse(body.text);
+  } catch (error) {
+    if (DEAD.test(String((error as Error).message))) {
+      context = null;
+      mainPage = null;
+      sessionState = "down";
+    }
+    throw error;
+  }
+}
+
+/** Скриншот текущей вкладки — чтобы видеть, что перед человеком, не заходя в VNC. */
+export async function screenshot(): Promise<Buffer | null> {
+  if (!mainPage) return null;
+  try {
+    return await mainPage.screenshot({ type: "png" });
+  } catch {
+    return null;
   }
 }
 
 export async function shutdown(): Promise<void> {
-  if (idleTimer) clearTimeout(idleTimer);
-  challenged = false;
-  mainPage = null;
   try {
     await context?.close();
   } catch {
-    /* уже закрыт */
-  }
-  try {
-    await browser?.close();
-  } catch {
-    /* уже закрыт */
+    // уже закрыт
   }
   context = null;
-  browser = null;
+  mainPage = null;
+  sessionState = "down";
 }

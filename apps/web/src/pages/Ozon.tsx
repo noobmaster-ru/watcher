@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { formatDate, money } from "../lib/format";
 import { Delta, Empty, ErrorBox, Spinner } from "../components/ui";
+import { OzonSession } from "../components/OzonSession";
 
 interface OzonWatch {
   id: number;
@@ -65,6 +66,7 @@ export function OzonPage() {
 
   return (
     <div className="space-y-6">
+      <OzonSession />
       <form
         className="card space-y-3"
         onSubmit={(event) => {

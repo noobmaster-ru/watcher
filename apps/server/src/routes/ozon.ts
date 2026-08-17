@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { OzonUnavailableError, type OzonClient } from "@watcher/ozon-core";
+import { OzonNeedsHumanError, OzonUnavailableError, type OzonClient } from "@watcher/ozon-core";
 import { db } from "../db/client.js";
 import { ozonProducts } from "../db/schema.js";
 import { requireAuth } from "../auth.js";
@@ -20,6 +20,47 @@ const notConfigured =
 
 export async function ozonRoutes(app: FastifyInstance, client: OzonClient | null): Promise<void> {
   app.addHook("preHandler", requireAuth);
+
+  /**
+   * Проверка для Caddy forward_auth перед окном браузера агента. Сюда доходят
+   * только с валидной сессией (preHandler выше отбил бы 401), поэтому просто
+   * подтверждаем: 204 = пускать.
+   */
+  app.get("/api/ozon/vnc-auth", async (_request, reply) => reply.code(204).send());
+
+  /**
+   * Состояние сессии браузера агента: живая, ждёт человека или браузер лежит.
+   * Интерфейс по этому решает, показывать ли кнопку «пройти проверку».
+   */
+  app.get("/api/ozon/session", async (_request, reply) => {
+    if (!client) return reply.send({ available: false, session: "down", lastTitle: notConfigured, lastCheckAt: null });
+    const session = await client.session();
+    return reply.send({
+      available: true,
+      session: session?.session ?? "down",
+      lastTitle: session?.lastTitle ?? "",
+      lastCheckAt: session?.lastCheckAt ?? null,
+    });
+  });
+
+  /** Перепроверить сессию — после того, как человек прошёл капчу в окне. */
+  app.post("/api/ozon/session/check", async (_request, reply) => {
+    if (!client) return reply.code(400).send({ error: notConfigured });
+    try {
+      const status = await client.checkSession();
+      return reply.send({ session: status?.session ?? "down", lastTitle: status?.lastTitle ?? "" });
+    } catch (error) {
+      return reply.code(503).send({ error: (error as Error).message });
+    }
+  });
+
+  /** Скриншот окна браузера: что сейчас на экране у агента. */
+  app.get("/api/ozon/session/screenshot", async (_request, reply) => {
+    if (!client) return reply.code(400).send({ error: notConfigured });
+    const png = await client.screenshot();
+    if (!png) return reply.code(404).send({ error: "браузер агента не запущен" });
+    return reply.header("cache-control", "no-store").type("image/png").send(png);
+  });
 
   app.get("/api/ozon/watches", async (request, reply) => {
     return reply.send({ available: client !== null, watches: await listOzonWatches(request.user!.id) });
@@ -42,6 +83,9 @@ export async function ozonRoutes(app: FastifyInstance, client: OzonClient | null
       });
       return reply.send(result);
     } catch (error) {
+      if (error instanceof OzonNeedsHumanError) {
+        return reply.code(423).send({ error: error.message, needsHuman: true });
+      }
       if (error instanceof OzonUnavailableError) {
         return reply.code(503).send({ error: error.message, degraded: true });
       }
@@ -90,6 +134,9 @@ export async function ozonRoutes(app: FastifyInstance, client: OzonClient | null
       const items = await client.search(query.data.q, query.data.limit);
       return reply.send({ query: query.data.q, items });
     } catch (error) {
+      if (error instanceof OzonNeedsHumanError) {
+        return reply.code(423).send({ error: error.message, needsHuman: true });
+      }
       if (error instanceof OzonUnavailableError) {
         return reply.code(503).send({ error: error.message, degraded: true });
       }

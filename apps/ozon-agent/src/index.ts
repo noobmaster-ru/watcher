@@ -4,7 +4,7 @@
 // не задевают API и базу.
 
 import Fastify from "fastify";
-import { browserStatus, fetchComposer, shutdown } from "./browser.js";
+import { NeedsHumanError, browserStatus, checkSession, fetchComposer, screenshot, shutdown } from "./browser.js";
 import { parseProduct, parseSearch } from "./parse.js";
 
 const app = Fastify({ logger: false });
@@ -26,6 +26,26 @@ app.get("/health", async (_request, reply) => {
   return reply.send({ ok: true, browser: browserStatus() });
 });
 
+/** Явная проверка сессии — вызывается кнопкой из интерфейса и планировщиком. */
+app.post("/session/check", async (_request, reply) => {
+  try {
+    const state = await serialize(() => checkSession());
+    return reply.send({ ...browserStatus(), session: state });
+  } catch (error) {
+    return reply.code(503).send({ error: (error as Error).message, ...browserStatus() });
+  }
+});
+
+/**
+ * Скриншот окна браузера. Показывается в интерфейсе, чтобы человек понимал,
+ * что перед ним — капча, заглушка или уже главная Озона — не заходя в VNC.
+ */
+app.get("/session/screenshot", async (_request, reply) => {
+  const png = await screenshot();
+  if (!png) return reply.code(404).send({ error: "браузер не запущен" });
+  return reply.type("image/png").send(png);
+});
+
 app.get<{ Params: { sku: string } }>("/product/:sku", async (request, reply) => {
   const sku = request.params.sku;
   if (!/^\d{5,16}$/.test(sku)) return reply.code(400).send({ error: "нужен числовой sku" });
@@ -38,8 +58,10 @@ app.get<{ Params: { sku: string } }>("/product/:sku", async (request, reply) => 
   } catch (error) {
     const message = (error as Error).message;
     log(`product ${sku}:`, message);
-    // 404 от композера — товара нет; всё остальное — недоступность
+    // 404 от композера — товара нет; «нужен человек» — отдельный код, чтобы
+    // приложение показало кнопку, а не крутило ретраи
     if (/HTTP 404/.test(message)) return reply.code(404).send({ error: "товар не найден" });
+    if (error instanceof NeedsHumanError) return reply.code(423).send({ error: message, needsHuman: true });
     return reply.code(503).send({ error: message });
   }
 });
@@ -56,6 +78,9 @@ app.get<{ Querystring: { q?: string; limit?: string } }>("/search", async (reque
     return reply.send({ items: parseSearch(page, limit) });
   } catch (error) {
     log(`search «${query}»:`, (error as Error).message);
+    if (error instanceof NeedsHumanError) {
+      return reply.code(423).send({ error: (error as Error).message, needsHuman: true });
+    }
     return reply.code(503).send({ error: (error as Error).message });
   }
 });

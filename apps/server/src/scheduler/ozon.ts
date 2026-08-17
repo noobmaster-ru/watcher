@@ -3,7 +3,7 @@
 // некуда — холодный старт агента и так занимает ~15 секунд раз в час.
 
 import { sql } from "drizzle-orm";
-import { OzonUnavailableError, type OzonClient } from "@watcher/ozon-core";
+import { OzonNeedsHumanError, OzonUnavailableError, type OzonClient } from "@watcher/ozon-core";
 import { db, rowsOf } from "../db/client.js";
 import { applyOzonSnapshot, fanOutOzonEvents, markOzonError } from "../services/ozon.js";
 
@@ -33,11 +33,13 @@ export interface OzonTickResult {
   events: number;
   missing: number;
   degraded: boolean;
+  /** Сессия браузера ждёт человека: капча. Товары не виноваты, штрафовать нечего. */
+  needsHuman: boolean;
 }
 
 export async function runOzonTick(client: OzonClient, limit = BATCH): Promise<OzonTickResult> {
   const due = await claimDue(limit);
-  const result: OzonTickResult = { checked: 0, events: 0, missing: 0, degraded: false };
+  const result: OzonTickResult = { checked: 0, events: 0, missing: 0, degraded: false, needsHuman: false };
 
   for (const sku of due) {
     try {
@@ -51,6 +53,12 @@ export async function runOzonTick(client: OzonClient, limit = BATCH): Promise<Oz
       if (events.length > 0) result.events += await fanOutOzonEvents(sku, events);
       result.checked += 1;
     } catch (error) {
+      if (error instanceof OzonNeedsHumanError) {
+        // Капча для человека. Ретраить бессмысленно и вредно: каждая попытка
+        // продлевает штраф. Товары вернутся в очередь сами по истечении аренды.
+        result.needsHuman = true;
+        break;
+      }
       if (error instanceof OzonUnavailableError) {
         result.degraded = true;
         break; // агент лежит или Озон закрылся — остальные подождут следующего тика

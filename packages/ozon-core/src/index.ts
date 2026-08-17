@@ -25,6 +25,27 @@ export class OzonUnavailableError extends Error {
   }
 }
 
+/**
+ * Сессия браузера протухла, и автоматически её не восстановить: Озон
+ * показывает капчу для человека. Это не сбой, а штатное состояние — интерфейс
+ * должен показать кнопку «открыть окно браузера», а планировщик — не ретраить.
+ */
+export class OzonNeedsHumanError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OzonNeedsHumanError";
+  }
+}
+
+export type OzonSessionState = "down" | "needs_human" | "ready";
+
+export interface OzonAgentStatus {
+  running: boolean;
+  session: OzonSessionState;
+  lastTitle: string;
+  lastCheckAt: string | null;
+}
+
 interface AgentProduct {
   sku: string | null;
   name: string | null;
@@ -88,6 +109,11 @@ export class OzonClient {
       this.lastOkAt = Date.now();
       return null as T;
     }
+    if (response.status === 423) {
+      // агент говорит: сессия жива только с участием человека
+      this.lastError = String(body.error ?? "нужна проверка человеком");
+      throw new OzonNeedsHumanError(this.lastError);
+    }
     if (!response.ok) {
       this.lastError = String(body.error ?? `HTTP ${response.status}`);
       throw new OzonUnavailableError(this.lastError);
@@ -109,6 +135,46 @@ export class OzonClient {
     return (raw?.items ?? [])
       .map((item) => toProduct({ ...item, available: true, cardPrice: null }))
       .filter((p): p is OzonProduct => p !== null);
+  }
+
+  /** Состояние сессии браузера агента. */
+  async session(): Promise<OzonAgentStatus | null> {
+    try {
+      const raw = await this.call<{ browser: OzonAgentStatus }>("/health", 10_000);
+      return raw?.browser ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Просит агента заново проверить сессию (после того как человек прошёл капчу). */
+  async checkSession(): Promise<OzonAgentStatus | null> {
+    let response: Response;
+    try {
+      response = await fetch(`${this.base}/session/check`, { method: "POST", signal: AbortSignal.timeout(120_000) });
+    } catch (error) {
+      throw new OzonUnavailableError((error as Error).message);
+    }
+    const body = (await response.json().catch(() => ({}))) as OzonAgentStatus & { error?: string };
+    if (!response.ok) throw new OzonUnavailableError(body.error ?? `HTTP ${response.status}`);
+    this.lastError = body.session === "ready" ? null : (this.lastError ?? body.lastTitle);
+    return body;
+  }
+
+  /** Скриншот окна браузера агента (PNG) — что сейчас видит «человек». */
+  async screenshot(): Promise<Buffer | null> {
+    try {
+      const response = await fetch(`${this.base}/session/screenshot`, { signal: AbortSignal.timeout(20_000) });
+      if (!response.ok) return null;
+      return Buffer.from(await response.arrayBuffer());
+    } catch {
+      return null;
+    }
+  }
+
+  /** Адрес noVNC внутри docker-сети — приложение проксирует его наружу. */
+  get vncBase(): string {
+    return this.base.replace(/:\d+$/, ":6080");
   }
 
   status() {
