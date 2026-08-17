@@ -29,7 +29,9 @@ const SETTLE_MS = 6_000;
 // тот же список через chrome://version-подобные утечки. --no-sandbox нужен
 // только потому, что в контейнере нет user namespaces; всё остальное — шум.
 const LAUNCH_ARGS = [
-  "--no-sandbox",
+  // --no-sandbox убран: Chrome показывает его жёлтой плашкой «unsupported
+  // flag», и это видно на экране антиботу. Вместо него контейнер получает
+  // seccomp-профиль Chrome в docker-compose, и песочница работает штатно.
   "--disable-dev-shm-usage",
   "--mute-audio",
   "--no-first-run",
@@ -73,6 +75,15 @@ export type SessionState = "down" | "needs_human" | "ready" | "network_error";
 let sessionState: SessionState = "down";
 let lastTitle = "";
 let lastCheckAt: Date | null = null;
+/** Пока человек в окне (noVNC), агент вкладку не трогает: ни навигаций, ни fetch. */
+let humanUntil = 0;
+
+export function markHumanActive(ms = 3 * 60_000): void {
+  humanUntil = Date.now() + ms;
+}
+export function humanActive(): boolean {
+  return Date.now() < humanUntil;
+}
 
 /** Состояние сессии — для /health и для сообщения в интерфейсе. */
 export function browserStatus(): {
@@ -143,23 +154,46 @@ async function launch(): Promise<void> {
  * Проверяет, жива ли сессия: открывает главную и смотрит заголовок. Никаких
  * повторных заходов — если стена, значит нужен человек, и об этом сообщается.
  */
+/**
+ * Проверяет, жива ли сессия. Тонкость: если во вкладке уже стоит капча, её
+ * НЕЛЬЗЯ перезагружать — капча одноразовая, повторный заход получает вместо
+ * неё глухую заглушку, и человек, открывший окно, видит стену. Поэтому сперва
+ * смотрим, что на экране сейчас, и переходим на главную только если там пусто
+ * или уже готовая страница Озона.
+ */
 export async function checkSession(): Promise<SessionState> {
   await launch();
   const page = mainPage as Page;
   lastCheckAt = new Date();
-  try {
-    await page.goto(HOME, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
-    await page.waitForTimeout(SETTLE_MS);
-    lastTitle = await page.title();
-  } catch (error) {
-    // Сеть не дошла до Озона (прокси мёртв, DNS, таймаут). Это не «сессия
-    // жива» и не «нужен человек» — это отдельное состояние, иначе агент бы
-    // радостно рапортовал о живой сессии, ни разу не увидев Озон.
-    lastTitle = `сеть: ${((error as Error).message.split("\n")[0] ?? "").slice(0, 90)}`;
-    sessionState = "network_error";
-    log("сеть недоступна:", lastTitle);
+
+  const current = await page.title().catch(() => "");
+  const url = page.url();
+  if (/captcha/i.test(current)) {
+    // капча на экране — оставляем как есть, ждём человека
+    lastTitle = current;
+    sessionState = "needs_human";
+    log("на экране капча, не трогаю — нужен человек");
     return sessionState;
   }
+
+  const onOzon = /ozon\.ru/.test(url) && !/about:blank/.test(url);
+  const blockedNow = BLOCKED.test(current);
+  if (!onOzon || blockedNow || !current) {
+    // пусто, заглушка или чужая страница — заходим заново
+    try {
+      await page.goto(HOME, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
+      await page.waitForTimeout(SETTLE_MS);
+      lastTitle = await page.title();
+    } catch (error) {
+      lastTitle = `сеть: ${((error as Error).message.split("\n")[0] ?? "").slice(0, 90)}`;
+      sessionState = "network_error";
+      log("сеть недоступна:", lastTitle);
+      return sessionState;
+    }
+  } else {
+    lastTitle = current;
+  }
+
   sessionState = BLOCKED.test(lastTitle) || !lastTitle ? "needs_human" : "ready";
   log(sessionState === "ready" ? "сессия жива:" : "нужен человек:", lastTitle.slice(0, 50));
   return sessionState;
@@ -181,6 +215,8 @@ const DEAD = /Target page, context or browser has been closed|Session closed|Con
  * поднимаем NeedsHumanError.
  */
 export async function fetchComposer(path: string): Promise<unknown> {
+  // За рулём человек — не мешаем: любой наш запрос может перезагрузить капчу
+  if (humanActive()) throw new NeedsHumanError("человек проходит проверку в окне браузера");
   await launch();
   if (sessionState !== "ready") {
     const state = await checkSession();

@@ -4,7 +4,16 @@
 // не задевают API и базу.
 
 import Fastify from "fastify";
-import { NeedsHumanError, browserStatus, checkSession, fetchComposer, screenshot, shutdown } from "./browser.js";
+import {
+  NeedsHumanError,
+  browserStatus,
+  checkSession,
+  fetchComposer,
+  humanActive,
+  markHumanActive,
+  screenshot,
+  shutdown,
+} from "./browser.js";
 import { parseProduct, parseSearch } from "./parse.js";
 
 const app = Fastify({ logger: false });
@@ -23,7 +32,16 @@ function serialize<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 app.get("/health", async (_request, reply) => {
-  return reply.send({ ok: true, browser: browserStatus() });
+  return reply.send({ ok: true, browser: { ...browserStatus(), humanActive: humanActive() } });
+});
+
+/**
+ * Интерфейс дёргает это, пока у человека открыто окно браузера: на это время
+ * агент замирает и не трогает вкладку, чтобы не сбить капчу под руками.
+ */
+app.post("/session/human", async (_request, reply) => {
+  markHumanActive();
+  return reply.send({ ok: true, until: Date.now() + 3 * 60_000 });
 });
 
 /** Явная проверка сессии — вызывается кнопкой из интерфейса и планировщиком. */

@@ -161,6 +161,15 @@ export class OzonClient {
     return body;
   }
 
+  /** Сообщает агенту, что человек сейчас в окне браузера: агент замирает. */
+  async markHumanActive(): Promise<void> {
+    try {
+      await fetch(`${this.base}/session/human`, { method: "POST", signal: AbortSignal.timeout(10_000) });
+    } catch {
+      // агент лежит — и трогать вкладку некому
+    }
+  }
+
   /** Скриншот окна браузера агента (PNG) — что сейчас видит «человек». */
   async screenshot(): Promise<Buffer | null> {
     try {

@@ -69,6 +69,10 @@ services:
     # Chrome с окном тяжелее headless: сам браузер плюс Xvfb и VNC.
     mem_limit: 1200m
     shm_size: 512m
+    # Настоящая песочница Chrome вместо флага --no-sandbox: ей нужны user
+    # namespaces, которые docker по умолчанию режет seccomp-профилем.
+    security_opt:
+      - seccomp:./apps/ozon-agent/chrome-seccomp.json
     environment:
       PORT: 8100
       # Российский прокси для Озона. Профиль и прокси неразлучны: кука

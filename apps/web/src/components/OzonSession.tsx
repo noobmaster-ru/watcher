@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { ErrorBox } from "./ui";
@@ -36,6 +36,28 @@ export function OzonSession() {
       setShotKey((k) => k + 1);
     },
   });
+
+  // Пока вкладка с окном браузера открыта, шлём агенту «человек за рулём»,
+  // чтобы он не перезагрузил капчу под руками. Ссылка открывается через
+  // window.open, и мы знаем, когда её закрыли.
+  const windowRef = useRef<Window | null>(null);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (windowRef.current && !windowRef.current.closed) {
+        void api.post("/api/ozon/session/human");
+      }
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const openWindow = () => {
+    void api.post("/api/ozon/session/human");
+    windowRef.current = window.open(
+      "/ozon-browser/vnc.html?autoconnect=1&resize=scale&path=ozon-browser/websockify",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  };
 
   const state = session.data?.session ?? "down";
   const styles: Record<SessionState, { dot: string; label: string; hint: string }> = {
@@ -75,14 +97,9 @@ export function OzonSession() {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          <a
-            href="/ozon-browser/vnc.html?autoconnect=1&resize=scale&path=ozon-browser/websockify"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={state === "needs_human" ? "btn-primary" : "btn-ghost"}
-          >
+          <button onClick={openWindow} className={state === "needs_human" ? "btn-primary" : "btn-ghost"}>
             Открыть окно браузера
-          </a>
+          </button>
           <button className="btn-ghost" onClick={() => check.mutate()} disabled={check.isPending}>
             {check.isPending ? "Проверяю…" : "Проверить снова"}
           </button>

@@ -54,6 +54,13 @@ export async function ozonRoutes(app: FastifyInstance, client: OzonClient | null
     }
   });
 
+  /** «Человек в окне»: интерфейс шлёт это, пока открыто окно браузера. */
+  app.post("/api/ozon/session/human", async (_request, reply) => {
+    if (!client) return reply.code(400).send({ error: notConfigured });
+    await client.markHumanActive();
+    return reply.send({ ok: true });
+  });
+
   /** Скриншот окна браузера: что сейчас на экране у агента. */
   app.get("/api/ozon/session/screenshot", async (_request, reply) => {
     if (!client) return reply.code(400).send({ error: notConfigured });
