@@ -24,15 +24,16 @@ const NAV_TIMEOUT_MS = 90_000;
 /** Сколько ждать после перехода, чтобы понять, отдал ли Озон страницу. */
 const SETTLE_MS = 6_000;
 
+// Минимум флагов. Каждый лишний — заметен: --disable-setuid-sandbox Chrome
+// показывает жёлтой плашкой «unsupported command-line flag», а антибот читает
+// тот же список через chrome://version-подобные утечки. --no-sandbox нужен
+// только потому, что в контейнере нет user namespaces; всё остальное — шум.
 const LAUNCH_ARGS = [
-  "--disable-blink-features=AutomationControlled",
   "--no-sandbox",
-  "--disable-setuid-sandbox",
   "--disable-dev-shm-usage",
   "--mute-audio",
   "--no-first-run",
   "--no-default-browser-check",
-  "--disable-background-networking",
   "--window-size=1366,900",
   "--window-position=0,0",
 ];
@@ -110,7 +111,11 @@ async function launch(): Promise<void> {
       viewport: null, // окно задаёт размер само — как у настоящего пользователя
       locale: "ru-RU",
       timezoneId: "Europe/Moscow",
-      ignoreDefaultArgs: ["--enable-automation"],
+      // Playwright по умолчанию добавляет флаги, выдающие автоматизацию.
+      // --enable-automation вешает плашку «управляется тестовым ПО» и ставит
+      // navigator.webdriver; --disable-blink-features убирает его же, но само
+      // по себе редкое и палевное. Отключаем оба.
+      ignoreDefaultArgs: ["--enable-automation", "--disable-blink-features=AutomationControlled"],
     });
     context.on("close", () => {
       log("браузер закрылся");
