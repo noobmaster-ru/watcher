@@ -100,10 +100,13 @@ async function launch(): Promise<void> {
     log("запускаю Chrome с профилем", PROFILE_DIR, proxy ? `через прокси ${proxy.server}` : "без прокси");
     // channel не задаём: в образе Playwright лежит полный Chromium, headless:false
     // рисует его в DISPLAY (Xvfb), который поднимает entrypoint.
+    // Экран для окна: entrypoint поднимает Xvfb на :99. Передаём явно, а не
+    // через наследование окружения — оно до процесса node может не долететь.
     context = await chromium.launchPersistentContext(PROFILE_DIR, {
       headless: false,
       args: LAUNCH_ARGS,
       proxy,
+      env: { ...process.env, DISPLAY: process.env.DISPLAY || ":99" },
       viewport: null, // окно задаёт размер само — как у настоящего пользователя
       locale: "ru-RU",
       timezoneId: "Europe/Moscow",

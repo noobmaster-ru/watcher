@@ -11,6 +11,13 @@ set -e
 export DISPLAY=:99
 Xvfb :99 -screen 0 1366x900x24 -nolisten tcp -ac > /dev/null 2>&1 &
 
+# Chrome при некорректном завершении (убит по памяти, перезапуск контейнера)
+# оставляет в профиле lock-файлы и потом отказывается стартовать «поверх
+# работающего» экземпляра — которого давно нет. В контейнере Chrome всегда
+# один, так что снимать замок при старте безопасно.
+PROFILE="${OZON_PROFILE_DIR:-/data/ozon-profile}"
+rm -f "$PROFILE/SingletonLock" "$PROFILE/SingletonSocket" "$PROFILE/SingletonCookie" 2>/dev/null || true
+
 # ждём, пока X поднимется, иначе Chrome упадёт на старте
 for i in $(seq 1 30); do
   if xdpyinfo -display :99 > /dev/null 2>&1; then break; fi
