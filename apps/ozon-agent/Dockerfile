@@ -29,8 +29,11 @@ ENV NODE_ENV=production
 
 # Виртуальный экран и доступ к нему: Chrome с окном вместо headless, чтобы
 # антибот видел настоящий браузер, и noVNC, чтобы человек мог пройти капчу.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends xvfb x11vnc x11-utils novnc websockify \
+# DEBIAN_FRONTEND=noninteractive обязателен: tzdata (зависимость Xvfb) иначе
+# останавливает установку вопросом про часовой пояс, и сборка виснет навсегда.
+RUN DEBIAN_FRONTEND=noninteractive TZ=Europe/Moscow apt-get update \
+ && DEBIAN_FRONTEND=noninteractive TZ=Europe/Moscow apt-get install -y --no-install-recommends \
+      xvfb x11vnc x11-utils novnc websockify \
  && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
